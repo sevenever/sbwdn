@@ -1,4 +1,5 @@
 #include <event2/event.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -101,7 +102,6 @@ struct sb_connection * sb_connection_new(struct event_base * eventbase, int clie
         return NULL;
     }
     conn->net_fd = client_fd;
-    conn->net_read_closed = 0;
     conn->eventbase = eventbase;
 
     struct event * readevent = event_new(conn->eventbase, conn->net_fd, EV_READ | EV_PERSIST, sb_do_net_read, conn);
@@ -110,6 +110,7 @@ struct sb_connection * sb_connection_new(struct event_base * eventbase, int clie
     conn->writeevent = writeevent;
 
     TAILQ_INIT(&(conn->buffers));
+    conn->buffer_count = 0;
 
     snprintf(conn->desc, SB_CONN_DESC_MAX, "[net_fd: %d]", conn->net_fd);
 
@@ -124,6 +125,7 @@ void sb_connection_del(struct sb_connection * conn) {
         free(buf);
         buf = buf2;
     }
+    conn->buffer_count = 0;
     event_del(conn->writeevent);
     event_del(conn->readevent);
 
@@ -150,17 +152,20 @@ void sb_do_net_read(evutil_socket_t fd, short what, void * data) {
         } else if (ret == 0) {
             // EOF
             event_del(conn->readevent);
-            log_info("net peer closed connection");
-            shutdown(fd, SHUT_RD);
-            conn->net_read_closed = 1;
-            // change conn state
+            log_info("net peer closed connection, closing net connection for %s",  conn->desc);
+            close(fd);
+            sb_connection_del(conn);
         } else {
             buf->len = ret;
             buf->head = buf->data;
             // put data into queue, will send to client
             TAILQ_INSERT_TAIL(&(conn->buffers), buf, entries);
+            conn->buffer_count++;
             event_add(conn->writeevent, NULL);
             // if buffer full, disable read
+            if (conn->buffer_count == SB_BUFFER_MAX) {
+                event_del(conn->readevent);
+            }
         }
     }
 }
@@ -189,6 +194,8 @@ void sb_do_net_write(evutil_socket_t fd, short what, void * data) {
                 if (ret == tosend) {
                     // all sent, remove buf from buffers
                     TAILQ_REMOVE(&(conn->buffers), buf, entries);
+                    conn->buffer_count--;
+                    event_add(conn->readevent, NULL);
                 } else if (ret < tosend) {
                     buf->head += ret;
                 } else {
@@ -199,19 +206,12 @@ void sb_do_net_write(evutil_socket_t fd, short what, void * data) {
         if (TAILQ_EMPTY(&(conn->buffers))) {
             log_debug("no data in buffers, disabling write for %s",  conn->desc);
             event_del(conn->writeevent);
-            if (conn->net_read_closed) {
-                shutdown(fd, SHUT_WR);
-                // clear connection
-                sb_connection_del(conn);
-            }
         }
     }
 }
 
 int main(int argc, char ** argv) {
     struct event_base * eventbase;
-    struct event *ev1, *ev2;
-    int listen_fd, listen_fd6;
 
     // setup libevent log
     event_set_log_callback(libevent_log);
@@ -223,6 +223,8 @@ int main(int argc, char ** argv) {
     }
 
     struct sockaddr_in listen_addr;
+    int listen_fd;
+    struct event *accept_ev;
     memset(&listen_addr, 0, sizeof(listen_addr));
     listen_addr.sin_family = AF_INET;
     listen_addr.sin_addr.s_addr = INADDR_ANY;
@@ -232,11 +234,13 @@ int main(int argc, char ** argv) {
         log_fatal("failed to setup server socket for ipv4.");
         return 1;
     } else {
-        ev1 = event_new(eventbase, listen_fd, EV_READ|EV_PERSIST, sb_do_net_accept, eventbase);
-        event_add(ev1, NULL);
+        accept_ev = event_new(eventbase, listen_fd, EV_READ|EV_PERSIST, sb_do_net_accept, eventbase);
+        event_add(accept_ev, NULL);
     }
 #ifndef __linux__
     struct sockaddr_in6 listen_addr6;
+    int listen_fd6;
+    struct event *accept_ev6;
     memset(&listen_addr6, 0, sizeof(listen_addr6));
     listen_addr6.sin6_family = AF_INET6;
     listen_addr6.sin6_addr = in6addr_any;
@@ -246,8 +250,8 @@ int main(int argc, char ** argv) {
         log_fatal("failed to setup server socket for ipv6.");
         return 1;
     } else {
-        ev2 = event_new(eventbase, listen_fd6, EV_READ|EV_PERSIST, sb_do_net_accept, eventbase);
-        event_add(ev2, NULL);
+        accept_ev6 = event_new(eventbase, listen_fd6, EV_READ|EV_PERSIST, sb_do_net_accept, eventbase);
+        event_add(accept_ev6, NULL);
     }
 #endif
 

@@ -5,9 +5,8 @@
 #include <event2/event.h>
 
 #define SB_BUFFER_SIZE 4096
+#define SB_BUFFER_MAX 4096
 #define SB_CONN_DESC_MAX 1024
-
-struct sb_buffer;
 
 struct sb_buffer {
     size_t len;
@@ -18,13 +17,13 @@ struct sb_buffer {
 
 struct sb_connection {
     int net_fd;
-    int net_read_closed;
     struct event_base * eventbase;
 
     struct event * readevent;
     struct event * writeevent;
 
     TAILQ_HEAD(, sb_buffer) buffers;
+    int buffer_count;
 
     char desc[SB_CONN_DESC_MAX];
 };
