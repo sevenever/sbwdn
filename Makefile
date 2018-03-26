@@ -1,5 +1,5 @@
 TARGET = sbwdn
-LIBS = -levent
+LIBS = -levent -lconfuse
 CC = gcc
 DEBUGFLAG= -g
 CFLAGS = $(DEBUGFLAG) -Wall -Wextra

@@ -8,5 +8,5 @@ struct sb_tun_dev {
 
     int tun_fd;
 };
-int setup_tun();
+int setup_tun(const char * addr, const char * paddr, const char * mask, int mtu);
 #endif
