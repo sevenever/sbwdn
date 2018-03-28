@@ -10,6 +10,8 @@
 #define PROTO_IPV4 0x0800
 #define PROTO_IPV6 0x08dd
 
+#define IP_PKG_SIZE_MAX 65536
+
 #define SB_PKG_BUF_MAX 1024
 #define SB_CONN_DESC_MAX 1024
 
@@ -44,7 +46,7 @@ struct __attribute__ ((packed)) sb_tun_pkg {
 
 struct __attribute__ ((packed)) sb_net_buf {
     char len_buf[2];
-    char pkg_buf[65536];
+    char pkg_buf[sizeof(struct sb_tun_pi) + IP_PKG_SIZE_MAX];
 };
 
 /* this represent an IP package */
@@ -137,7 +139,7 @@ void sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * p
  * sb_app
  * ------------------------------------------------------------------------------------------------ */
 struct sb_app {
-    struct sb_config config;
+    struct sb_config * config;
     int tun_fd;
 
     struct event_base * eventbase;

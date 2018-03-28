@@ -10,7 +10,7 @@
 #include <stdbool.h>
 #include <netdb.h>
 
-#include "log.h"
+#include "sb_log.h"
 #include "sb_config.h"
 #include "sbwdn.h"
 #include "sb_tun.h"
@@ -225,7 +225,7 @@ void sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * p
         case CONNECTED:
             // this is the init package, contains client ip
             conn->peer_addr = *((struct in_addr *)pkg->ipdata);
-            char buf[128];
+            char buf[INET_ADDRSTRLEN];
             log_info("peer addr is %s", inet_ntop(AF_INET, (const void *)&(conn->peer_addr), buf, sizeof(buf)));
             conn->net_state = ESTABLISHED;
             break;
@@ -446,7 +446,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
     struct sb_app * app = (struct sb_app *) data;
     /* read a package from tun */
     int tun_frame_size;
-    int buflen = app->config.mtu + sizeof(struct sb_tun_pi);
+    int buflen = app->config->mtu + sizeof(struct sb_tun_pi);
     char buf[buflen];
 
     log_debug("reading a package from tun");
@@ -473,8 +473,8 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
     struct in_addr saddr = *(struct in_addr *)&(iphdr->saddr);
     struct in_addr daddr = *(struct in_addr *)&(iphdr->daddr);
     unsigned int ipdatalen = tun_frame_size - sizeof(struct sb_tun_pi);
-    char srcbuf[128];
-    char dstbuf[128];
+    char srcbuf[INET_ADDRSTRLEN];
+    char dstbuf[INET_ADDRSTRLEN];
     log_debug("src addr: %s, dest addr: %s, ip pkg len: %d",
             inet_ntop(AF_INET, (const void *)&saddr, srcbuf, sizeof(srcbuf)),
             inet_ntop(AF_INET, (const void *)&daddr, dstbuf, sizeof(dstbuf)),
@@ -483,7 +483,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
     struct sb_connection * conn;
     TAILQ_FOREACH(conn, &(app->conns), entries) {
         log_debug("conn addr: %d, pkg addr: %d", conn->peer_addr.s_addr, daddr.s_addr);
-        if (app->config.app_mode == CLIENT || conn->peer_addr.s_addr == daddr.s_addr) {
+        if (app->config->app_mode == CLIENT || conn->peer_addr.s_addr == daddr.s_addr) {
             if (conn->t2n_pkg_count >= SB_PKG_BUF_MAX) {
                 /* should I send a ICMP or something? */
             } else {
@@ -544,8 +544,10 @@ struct sb_app * sb_app_new(struct event_base * eventbase) {
         log_error("failed to allocate memory for sb_app: %s", strerror(errno));
         return 0;
     }
-    app->config.cfg = 0;
+    app->config = 0;
     app->eventbase = eventbase;
+    app->tun_readevent = 0;
+    app->tun_writeevent = 0;
     TAILQ_INIT(&(app->conns));
 
     return app;
@@ -555,6 +557,8 @@ int main(int argc, char ** argv) {
         dprintf(STDERR_FILENO, "Usage: %s -f [config file path]\n", argv[0]);
         return 1;
     }
+
+    sb_logger.lvl = LOG_INFO;
 
     /* setup libevent */
     struct event_base * eventbase;
@@ -574,13 +578,14 @@ int main(int argc, char ** argv) {
     }
 
     char * config_file = argv[2];
-    int ret = sb_config_read(app, config_file);
-    if (ret < 0) {
+    struct sb_config * config = sb_config_read(config_file);
+    if(!config) {
         log_fatal("failed to read config file %s", config_file);
         return -1;
     }
+    sb_config_apply(app, config);
 
-    int tun_fd = setup_tun(app->config.addr, app->config.paddr, app->config.mask, app->config.mtu);
+    int tun_fd = setup_tun(app->config->addr, app->config->paddr, app->config->mask, app->config->mtu);
     if (tun_fd < 0) {
         log_fatal("failed to setup tun device");
         return 1;
@@ -599,21 +604,21 @@ int main(int argc, char ** argv) {
     app->tun_readevent = tun_readevent;
     app->tun_writeevent = tun_writeevent;
 
-    if (app->config.app_mode == SERVER) {
+    if (app->config->app_mode == SERVER) {
         struct sockaddr_in listen_addr;
         int listen_fd;
         struct event *accept_ev;
         memset(&listen_addr, 0, sizeof(listen_addr));
         listen_addr.sin_family = AF_INET;
-        int ret = inet_pton(AF_INET, app->config.bind, &listen_addr.sin_addr);
+        int ret = inet_pton(AF_INET, app->config->bind, &listen_addr.sin_addr);
         if (ret < 0) {
-            log_error("failed to parse bind address %s. %d %s", app->config.bind, errno, strerror(errno));
+            log_error("failed to parse bind address %s. %d %s", app->config->bind, errno, strerror(errno));
             return 1;
         } else if (ret == 0) {
-            log_error("invalide bind address %s", app->config.bind);
+            log_error("invalide bind address %s", app->config->bind);
             return 1;
         }
-        listen_addr.sin_port = htons(app->config.port);
+        listen_addr.sin_port = htons(app->config->port);
         listen_fd = sb_server_socket(&listen_addr, sizeof(listen_addr));
         if (listen_fd < 0) {
             log_fatal("failed to setup server socket for ipv4.");
@@ -626,18 +631,18 @@ int main(int argc, char ** argv) {
         int ret;
         int client_fd;
         /* client mode */
-        log_info("connecting to %s:%d", app->config.remote, app->config.port);
+        log_info("connecting to %s:%d", app->config->remote, app->config->port);
         struct addrinfo hint, *ai, *ai0;
         memset(&hint, 0, sizeof(hint));
         hint.ai_family = AF_INET;
         hint.ai_socktype = SOCK_STREAM;
-        if (getaddrinfo(app->config.remote, 0, &hint, &ai0)) {
-            log_error("failed to resolve server address %s", app->config.remote);
+        if (getaddrinfo(app->config->remote, 0, &hint, &ai0)) {
+            log_error("failed to resolve server address %s", app->config->remote);
             return 1;
         }
         for(ai=ai0;ai;ai = ai->ai_next) {
             if (ai->ai_family == AF_INET) {
-                ((struct sockaddr_in *)(ai->ai_addr))->sin_port = htons(app->config.port);
+                ((struct sockaddr_in *)(ai->ai_addr))->sin_port = htons(app->config->port);
             }
             if ((client_fd = sb_client_socket((struct sockaddr_in *)ai->ai_addr, ai->ai_addrlen)) < 0) {
                 log_fatal("failed to setup client socket");
@@ -646,7 +651,7 @@ int main(int argc, char ** argv) {
         if (client_fd < 0) {
             return 1;
         }
-        log_info("connected to %s:%d", app->config.remote, app->config.port);
+        log_info("connected to %s:%d", app->config->remote, app->config->port);
         struct sb_connection * conn = sb_connection_new(app, client_fd);
         if (!conn) {
             log_error("failed to init connection for net fd %d", client_fd);
@@ -654,12 +659,12 @@ int main(int argc, char ** argv) {
         }
         /* put a initial package into packages_t2n, so that it can be send to server */
         struct sockaddr_in vpn_addr;
-        ret = inet_pton(AF_INET, app->config.addr, &vpn_addr.sin_addr);
+        ret = inet_pton(AF_INET, app->config->addr, &vpn_addr.sin_addr);
         if (ret < 0) {
-            log_error("failed to parse address %s. %d %s", app->config.addr, errno, strerror(errno));
+            log_error("failed to parse address %s. %d %s", app->config->addr, errno, strerror(errno));
             return 1;
         } else if (ret == 0) {
-            log_error("invalide addr address %s", app->config.addr);
+            log_error("invalide addr address %s", app->config->addr);
             return 1;
         }
         struct sb_package * init_pkg = sb_package_new((char *)&vpn_addr.sin_addr, sizeof(vpn_addr.sin_addr));

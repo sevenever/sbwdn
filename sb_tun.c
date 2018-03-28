@@ -19,7 +19,7 @@
 #include <arpa/inet.h>
 
 #include "sb_tun.h"
-#include "log.h"
+#include "sb_log.h"
 
 int setup_tun(const char * addr, const char * paddr, const char * mask, int mtu) {
     int fd, ret;

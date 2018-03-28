@@ -1,24 +1,27 @@
 #ifndef _SB_CONFIG_H_
 #define _SB_CONFIG_H_
 
-#include <confuse.h>
+#include "sb_log.h"
+#include "sbwdn.h"
+
+#define SB_CONFIG_STR_MAX 256
 
 enum SB_APP_MODE { SERVER, CLIENT };
 
 struct sb_config {
-    cfg_t *cfg;
-
     /* client or server */
     enum SB_APP_MODE app_mode;
-    char * bind;
-    char * remote;
+    char bind[SB_CONFIG_STR_MAX];
+    char remote[SB_CONFIG_STR_MAX];
     unsigned short port;
-    char * addr;
-    char * paddr;
-    char * mask;
+    char addr[SB_CONFIG_STR_MAX];
+    char paddr[SB_CONFIG_STR_MAX];
+    char mask[SB_CONFIG_STR_MAX];
     unsigned int mtu;
+    enum sb_log_lvl log;
 };
 
 struct sb_app;
-int sb_config_read(struct sb_app * app, const char * config_file);
+struct sb_config * sb_config_read(const char * config_file);
+void sb_config_apply(struct sb_app * app, struct sb_config * config);
 #endif
