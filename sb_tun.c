@@ -33,6 +33,7 @@ int setup_tun(const char * addr, const char * paddr, const char * mask, int mtu)
     }
     memset(&ifr, 0, sizeof(ifr));
 
+    strncpy(ifr.ifr_name, TUN_DEV_NAME, sizeof(ifr.ifr_name));
     ifr.ifr_flags = IFF_TUN;
 
     /* try to create the device */
@@ -63,6 +64,28 @@ int setup_tun(const char * addr, const char * paddr, const char * mask, int mtu)
     snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "tun%d", tun_id);
 #endif
 
+#ifdef SB_USE_IPROUTE
+    /* Using "ip" command to set ip of tun interface, I don't know why SIOCSIFADDR not work...
+     * When using SIOCSIFADDR, the package is not routed to the tun interface...
+     */
+    char cmd[1024];
+
+    log_info("bring up %s", ifr.ifr_name);
+    snprintf(cmd, sizeof(cmd), "/sbin/ip link set dev %s up mtu %d", ifr.ifr_name, mtu);
+    log_info("invoking %s", cmd);
+    ret = system(cmd);
+    if (ret != 0) {
+        log_error("failed to set address for tun interface %s", ifr.ifr_name);
+    }
+
+    log_info("setting address for %s", ifr.ifr_name);
+    snprintf(cmd, sizeof(cmd), "/sbin/ip addr add dev %s local %s peer %s", ifr.ifr_name, addr, paddr);
+    log_info("invoking %s", cmd);
+    ret = system(cmd);
+    if (ret != 0) {
+        log_error("failed to set address for tun interface %s", ifr.ifr_name);
+    }
+#else
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     ifr.ifr_addr.sa_family = AF_INET;
     log_info("setting address for tun to %s", addr);
@@ -115,6 +138,7 @@ int setup_tun(const char * addr, const char * paddr, const char * mask, int mtu)
         return -1;
     }
     log_info("set mtu for tun to %d", mtu);
+#endif
 
     return fd;
 }

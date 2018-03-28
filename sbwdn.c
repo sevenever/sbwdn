@@ -233,6 +233,7 @@ void sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * p
             log_debug("queue a pkg from net");
             TAILQ_INSERT_TAIL(&(conn->packages_n2t), pkg, entries);
             conn->n2t_pkg_count++;
+            log_debug("n2t_pkg_count is %d after inert", conn->n2t_pkg_count);
             break;
         case TERMINATED:
             log_warn("received a pkg in TERMINATED state");
@@ -284,7 +285,7 @@ int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
     int ret = recv(fd, read_buf->cur_p, buflen, 0);
     if (ret < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            log_debug("no data available from %s", read_buf->conn->desc);
+            log_debug("no more data available from %s", read_buf->conn->desc);
             return 0;
         } else {
             // error
@@ -373,6 +374,7 @@ void sb_do_net_read(evutil_socket_t fd, short what, void * data) {
                     // packages_n2t full
                     disable_net_read = true;
                 }
+                read_buf->cur_pkg = 0;
             }
         } else if (ret == 2) {
             // EOF
@@ -443,25 +445,25 @@ void sb_do_net_write(evutil_socket_t fd, short what, void * data) {
 void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
     struct sb_app * app = (struct sb_app *) data;
     /* read a package from tun */
-    int ret;
+    int tun_frame_size;
     int buflen = app->config.mtu + sizeof(struct sb_tun_pi);
     char buf[buflen];
 
     log_debug("reading a package from tun");
-    ret = read(fd, buf, buflen);
-    if (ret < 0) {
+    tun_frame_size = read(fd, buf, buflen);
+    if (tun_frame_size < 0) {
         log_error("failed to receive package from tun: %d %s", errno, strerror(errno));
         return;
     }
-    log_debug("read %d bytes from tun", ret);
+    log_debug("read %d bytes from tun", tun_frame_size);
 
-    struct sb_tun_pi * pi = (struct sb_tun_pi *)buf;
-    pi->flags = ntohs(pi->flags);
-    pi->proto = ntohs(pi->proto);
-    log_debug("flags in tun_pi:%04x", pi->flags);
-    log_debug("proto in tun_pi:%04x", pi->proto);
-    if (pi->proto != PROTO_IPV4) {
-        log_debug("unsupported protocol %04x", pi->proto);
+    struct sb_tun_pi pi = *(struct sb_tun_pi *)buf;
+    pi.flags = ntohs(pi.flags);
+    pi.proto = ntohs(pi.proto);
+    log_debug("flags in tun_pi:%04x", pi.flags);
+    log_debug("proto in tun_pi:%04x", pi.proto);
+    if (pi.proto != PROTO_IPV4) {
+        log_debug("unsupported protocol %04x", pi.proto);
         return;
     }
     /* check if the target ip is one of our client, if no, drop it on the floor */
@@ -470,7 +472,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
     struct iphdr * iphdr = &(((struct sb_tun_pkg *)buf)->iphdr);
     struct in_addr saddr = *(struct in_addr *)&(iphdr->saddr);
     struct in_addr daddr = *(struct in_addr *)&(iphdr->daddr);
-    unsigned int ipdatalen = ret - sizeof(struct sb_tun_pi);
+    unsigned int ipdatalen = tun_frame_size - sizeof(struct sb_tun_pi);
     char srcbuf[128];
     char dstbuf[128];
     log_debug("src addr: %s, dest addr: %s, ip pkg len: %d",
@@ -485,7 +487,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
             if (conn->t2n_pkg_count >= SB_PKG_BUF_MAX) {
                 /* should I send a ICMP or something? */
             } else {
-                struct sb_package * pkg = sb_package_new((char *)iphdr, ipdatalen);
+                struct sb_package * pkg = sb_package_new((char *)buf, tun_frame_size);
                 log_debug("queue a pkg from tun for connection %s", conn->desc);
                 TAILQ_INSERT_TAIL(&(conn->packages_t2n), pkg, entries);
                 conn->t2n_pkg_count++;
@@ -516,9 +518,10 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
                         return;
                     }
                 } else {
-                    log_debug("sent a pkg with length %d to tun", pkg->ipdatalen);
+                    log_debug("sent a pkg with length %d to tun", ret);
                     TAILQ_REMOVE(&(conn->packages_n2t), pkg, entries);
                     conn->n2t_pkg_count--;
+                    log_debug("n2t_pkg_count is %d after remove", conn->n2t_pkg_count);
                     event_add(conn->net_readevent, 0);
                 }
             }
