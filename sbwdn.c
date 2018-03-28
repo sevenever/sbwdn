@@ -538,13 +538,20 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
     }
 }
 
-struct sb_app * sb_app_new(struct event_base * eventbase) {
+struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_file) {
     struct sb_app * app = malloc(sizeof(struct sb_app));
     if (!app) {
         log_error("failed to allocate memory for sb_app: %s", strerror(errno));
         return 0;
     }
-    app->config = 0;
+
+    struct sb_config * config = sb_config_read(config_file);
+    if(!config) {
+        log_fatal("failed to read config file %s", config_file);
+        return 0;
+    }
+    sb_config_apply(app, config);
+
     app->eventbase = eventbase;
     app->tun_readevent = 0;
     app->tun_writeevent = 0;
@@ -552,6 +559,26 @@ struct sb_app * sb_app_new(struct event_base * eventbase) {
 
     return app;
 }
+
+void sb_app_del(struct sb_app * app) {
+    struct sb_connection * conn, * conn2;
+    conn = TAILQ_FIRST(&(app->conns));
+    while(conn) {
+        conn2 = TAILQ_NEXT(conn, entries);
+        sb_connection_del(conn);
+        conn = conn2;
+    }
+
+    app->tun_writeevent = 0;
+    app->tun_readevent = 0;
+    app->eventbase = 0;
+    app->config = 0;
+
+    free(app->config);
+    app->config = 0;
+    free(app);
+}
+
 int main(int argc, char ** argv) {
     if (argc != 3 || strlen(argv[1]) != 2 || strncmp(argv[1], "-f", 2) != 0) {
         dprintf(STDERR_FILENO, "Usage: %s -f [config file path]\n", argv[0]);
@@ -571,19 +598,12 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-    struct sb_app * app = sb_app_new(eventbase);
+    char * config_file = argv[2];
+    struct sb_app * app = sb_app_new(eventbase, config_file);
     if (!app) {
         log_fatal("faied to init sb_app");
         return 1;
     }
-
-    char * config_file = argv[2];
-    struct sb_config * config = sb_config_read(config_file);
-    if(!config) {
-        log_fatal("failed to read config file %s", config_file);
-        return -1;
-    }
-    sb_config_apply(app, config);
 
     int tun_fd = setup_tun(app->config->addr, app->config->paddr, app->config->mask, app->config->mtu);
     if (tun_fd < 0) {
@@ -682,6 +702,7 @@ int main(int argc, char ** argv) {
     /* Start the event loop. */
     event_base_dispatch(eventbase);
 
+    sb_app_del(app);
     return 0;
 }
 
