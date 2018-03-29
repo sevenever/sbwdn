@@ -86,18 +86,23 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * paddr, const s
         log_error("failed to set address for tun interface %s", ifr.ifr_name);
     }
 #else
+    char addrstr[INET_ADDRSTRLEN];
+
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     ifr.ifr_addr.sa_family = AF_INET;
-    log_info("setting address for tun to %s", addr);
+
+    inet_ntop(AF_INET, addr, addrstr, sizeof(addrstr));
+    log_info("setting address for tun to %s", addrstr);
     ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *addr;
     ret = ioctl(s, SIOCSIFADDR, &ifr);
     if (ret < 0) {
         log_error("failed to set address for tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));
         return -1;
     }
-    log_info("set address for tun to %s", addr);
+    log_info("set address for tun to %s", addrstr);
 
-    log_info("setting peer address for tun to %s", paddr);
+    inet_ntop(AF_INET, paddr, addrstr, sizeof(addrstr));
+    log_info("setting peer address for tun to %s", addrstr);
     ifr.ifr_addr.sa_family = AF_INET;
     ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *paddr;
     ret = ioctl(s, SIOCSIFDSTADDR, &ifr);
@@ -105,16 +110,17 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * paddr, const s
         log_error("failed to set peer address for tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));
         return -1;
     }
-    log_info("set peer address for tun to %s", paddr);
+    log_info("set peer address for tun to %s", addrstr);
 
-    log_info("setting mask for tun to %s", mask);
+    inet_ntop(AF_INET, mask, addrstr, sizeof(addrstr));
+    log_info("setting mask for tun to %s", addrstr);
     ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *mask;
     ret = ioctl(s, SIOCSIFNETMASK, &ifr);
     if (ret < 0) {
         log_error("failed to set net mask for tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));
         return -1;
     }
-    log_info("set mask for tun to %s", mask);
+    log_info("set mask for tun to %s", addrstr);
 
     log_info("bring tun up");
     ret = ioctl(s, SIOCGIFFLAGS, &ifr);

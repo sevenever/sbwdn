@@ -178,7 +178,8 @@ struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, str
     }
 
     char buf[INET_ADDRSTRLEN];
-    snprintf(conn->desc, SB_CONN_DESC_MAX, "[%s:%d(%s)]",
+    snprintf(conn->desc, SB_CONN_DESC_MAX, "%s[%s:%d(%s)]",
+            (conn->app->config->net_mode == TCP ? "TCP" : "UDP"),
             inet_ntop(AF_INET, &conn->peer.sin_addr, buf, sizeof(buf)),
             conn->peer.sin_port,
             "-");
@@ -194,7 +195,8 @@ void sb_connection_set_vpn_peer(struct sb_connection * conn, struct in_addr peer
     char vpnbuf[INET_ADDRSTRLEN];
     snprintf(conn->desc,
             SB_CONN_DESC_MAX,
-            "[%s:%d(%s)]",
+            "%s[%s:%d(%s)]",
+            (conn->app->config->net_mode == TCP ? "TCP" : "UDP"),
             inet_ntop(AF_INET, &conn->peer.sin_addr, buf, sizeof(buf)),
             ntohs(conn->peer.sin_port),
             inet_ntop(AF_INET, &conn->peer_vpn_addr, vpnbuf, sizeof(vpnbuf)));
@@ -551,6 +553,7 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
     }
 
     if (disable_net_write) {
+        log_debug("disabling tcp write of %s", conn->desc);
         event_del(conn->net_writeevent);
     }
     return;
@@ -597,6 +600,7 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
         conn->t2n_pkg_count--;
     }
     if (disable_net_write) {
+        log_debug("disabling udp write");
         event_del(app->udp_writeevent);
     }
 }
@@ -666,10 +670,12 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
             }
             enable_udp_write |= enable_net_write;
             if(enable_net_write && app->config->net_mode == TCP) {
+                log_debug("enabling write for %s", conn->desc);
                 event_add(conn->net_writeevent, 0);
             }
         }
         if (enable_udp_write && app->config->net_mode == UDP) {
+            log_debug("enabling write for udp");
             event_add(app->udp_writeevent, 0);
         }
     }
@@ -715,6 +721,7 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
         }
     }
     if (disable_tun_write) {
+        log_debug("disabling udp write");
         event_del(app->tun_writeevent);
     }
 }
