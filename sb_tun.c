@@ -21,7 +21,7 @@
 #include "sb_tun.h"
 #include "sb_log.h"
 
-int setup_tun(const char * addr, const char * paddr, const char * mask, int mtu) {
+int setup_tun(const struct in_addr * addr, const struct in_addr * paddr, const struct in_addr * mask, int mtu) {
     int fd, ret;
     struct ifreq ifr;
 
@@ -89,7 +89,7 @@ int setup_tun(const char * addr, const char * paddr, const char * mask, int mtu)
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     ifr.ifr_addr.sa_family = AF_INET;
     log_info("setting address for tun to %s", addr);
-    inet_pton(AF_INET, addr, &((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr);
+    ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *addr;
     ret = ioctl(s, SIOCSIFADDR, &ifr);
     if (ret < 0) {
         log_error("failed to set address for tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));
@@ -99,7 +99,7 @@ int setup_tun(const char * addr, const char * paddr, const char * mask, int mtu)
 
     log_info("setting peer address for tun to %s", paddr);
     ifr.ifr_addr.sa_family = AF_INET;
-    inet_pton(AF_INET, paddr, &((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr);
+    ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *paddr;
     ret = ioctl(s, SIOCSIFDSTADDR, &ifr);
     if (ret < 0) {
         log_error("failed to set peer address for tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));
@@ -108,7 +108,7 @@ int setup_tun(const char * addr, const char * paddr, const char * mask, int mtu)
     log_info("set peer address for tun to %s", paddr);
 
     log_info("setting mask for tun to %s", mask);
-    inet_pton(AF_INET, mask, &((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr);
+    ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *mask;
     ret = ioctl(s, SIOCSIFNETMASK, &ifr);
     if (ret < 0) {
         log_error("failed to set net mask for tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <arpa/inet.h>
 
 #include <confuse.h>
 
@@ -21,6 +22,7 @@ struct sb_config * sb_config_read(const char * config_file) {
     cfg_opt_t opts[] =
     {
         CFG_STR("mode", "", CFGF_NONE),
+        CFG_STR("net", "udp", CFGF_NONE),
         CFG_STR("bind", "", CFGF_NONE),
         CFG_STR("remote", "", CFGF_NONE),
         CFG_INT("port", 812, CFGF_NONE),
@@ -58,41 +60,74 @@ struct sb_config * sb_config_read(const char * config_file) {
         log_fatal("invalide app_mode[%s] in config file", app_mode_str);
         return 0;
     }
-    log_info("running in %s mode", app_mode_str);
+    log_info("app mode %s mode", app_mode_str);
+
+    const char * app_net_str = cfg_getstr(cfg, "net");
+    if (strcmp(app_net_str, "tcp") == 0) {
+        config->net_mode = TCP;
+    } else if (strcmp(app_net_str, "udp") == 0) {
+        config->net_mode = UDP;
+    } else if (strlen(app_net_str) == 0) {
+        log_fatal("net is required");
+        return 0;
+    } else {
+        log_fatal("invalide net [%s] in config file", app_net_str);
+        return 0;
+    }
+    log_info("network mode %s", app_net_str);
 
     if (config->app_mode == SERVER) {
-        strncpy(config->bind, cfg_getstr(cfg, "bind"), sizeof(config->bind));
-        if (strlen(config->bind) == 0) {
+        const char * bind_str = cfg_getstr(cfg, "bind");
+        if (strlen(bind_str) == 0) {
             log_fatal("bind is required if in server mode");
             return 0;
         }
+        if (inet_pton(AF_INET, bind_str, &config->bind) <= 0) {
+            log_fatal("failed to parse bind address %s", bind_str);
+            return 0;
+        }
+        log_info("bind address is %s", bind_str);
     } else {
         strncpy(config->remote, cfg_getstr(cfg, "remote"), sizeof(config->remote));
         if (strlen(config->remote) == 0) {
             log_fatal("remote is required if in client mode");
             return 0;
         }
+        log_info("remote address is %s", config->remote);
     }
 
     config->port = cfg_getint(cfg, "port");
+    log_info("bind port is %d", config->port);
 
-    strncpy(config->addr, cfg_getstr(cfg, "addr"), sizeof(config->addr));
-    if (strlen(config->addr) == 0) {
+    const char * addr_str = cfg_getstr(cfg, "addr");
+    if (strlen(addr_str) == 0) {
         log_fatal("addr is required");
         return 0;
+    } else if (inet_pton(AF_INET, addr_str, &config->addr) <= 0) {
+        log_fatal("failed to parse addr address %s", addr_str);
+        return 0;
     }
+    log_info("local address is %s", addr_str);
 
-    strncpy(config->paddr, cfg_getstr(cfg, "paddr"), sizeof(config->paddr));
-    if (strlen(config->paddr) == 0) {
+    const char * paddr_str = cfg_getstr(cfg, "paddr");
+    if (strlen(paddr_str) == 0) {
         log_fatal("paddr is required");
         return 0;
-    }
-
-    strncpy(config->mask, cfg_getstr(cfg, "mask"), sizeof(config->mask));
-    if (strlen(config->mask) == 0) {
-        log_fatal("mask is required");
+    } else if (inet_pton(AF_INET, paddr_str, &config->paddr) <= 0) {
+        log_fatal("failed to parse paddr address %s", paddr_str);
         return 0;
     }
+    log_info("peer address is %s", paddr_str);
+
+    const char * mask_str = cfg_getstr(cfg, "mask");
+    if (strlen(mask_str) == 0) {
+        log_fatal("mask is required");
+        return 0;
+    } else if (inet_pton(AF_INET, mask_str, &config->mask) <= 0) {
+        log_fatal("failed to parse mask %s", mask_str);
+        return 0;
+    }
+    log_info("network mask is %s", mask_str);
 
     config->mtu = cfg_getint(cfg, "mtu");
 

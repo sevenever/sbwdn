@@ -15,6 +15,7 @@
 #define SB_PKG_BUF_MAX 1024
 #define SB_CONN_DESC_MAX 1024
 
+#define SB_INVALIDE_FD -1
 
 struct iphdr {
     uint8_t    ihl:4,
@@ -32,7 +33,7 @@ struct iphdr {
 };
 
 /* ------------------------------------------------------------------------------------------------
- * package on wire
+ * package on wire - all integer should be in net order
  * ------------------------------------------------------------------------------------------------ */
 struct __attribute__ ((packed)) sb_tun_pi {
     uint16_t flags;
@@ -45,22 +46,29 @@ struct __attribute__ ((packed)) sb_tun_pkg {
 };
 
 struct __attribute__ ((packed)) sb_net_buf {
-    char len_buf[2];
+    uint32_t type;      /* sb_net_pkg_type */
+    uint16_t len_buf;    /* the length of valid data in pkg_buf */
     char pkg_buf[sizeof(struct sb_tun_pi) + IP_PKG_SIZE_MAX];
 };
 
+#define SB_NET_BUF_HEADER_SIZE offsetof(struct sb_net_buf, pkg_buf)
+
+#define SB_PKG_TYPE_INIT 1
+#define SB_PKG_TYPE_DATA 2
+#define SB_PKG_TYPE_BYE 3
 /* this represent an IP package */
 struct sb_package {
+    uint32_t type;
     unsigned int ipdatalen;
     char * ipdata;
     TAILQ_ENTRY(sb_package) entries;
 };
-struct sb_package * sb_package_new(char * ipdata, int ipdatalen);
+struct sb_package * sb_package_new(unsigned int type, char * ipdata, int ipdatalen);
 
 /* ------------------------------------------------------------------------------------------------
  * sb_net_io_buf
  * ------------------------------------------------------------------------------------------------ */
-enum net_io_state {LEN, PKG};
+enum net_io_state {HDR, PKG};
 struct sb_net_io_buf {
     struct sb_net_buf * buf;
 
@@ -99,14 +107,13 @@ int sb_net_io_buf_write(struct sb_net_io_buf * io_buf, int fd);
 /* ------------------------------------------------------------------------------------------------
  * sb_connection
  * ------------------------------------------------------------------------------------------------ */
-enum sb_net_mode { TCP, UDP };
-enum sb_conn_state { CONNECTED, ESTABLISHED, TERMINATED };
+enum sb_conn_state { NEW, CONNECTED, ESTABLISHED, TERMINATED };
 struct sb_connection {
     int net_fd;
-    enum sb_net_mode net_mode;
     enum sb_conn_state net_state;
 
-    struct in_addr peer_addr;
+    struct sockaddr_in peer;    /* the address of net peer */
+    struct in_addr peer_vpn_addr;    /* the address of vpn peer */
 
     struct sb_app * app;
     struct event_base * eventbase;
@@ -126,12 +133,14 @@ struct sb_connection {
     TAILQ_ENTRY(sb_connection) entries;
 };
 
-void sb_do_net_accept(evutil_socket_t listen_fd, short what, void * data);
-void sb_do_net_read(evutil_socket_t fd, short what, void * data);
-void sb_do_net_write(evutil_socket_t fd, short what, void * data);
-void sb_do_tun_read(evutil_socket_t fd, short what, void * data);
-void sb_do_tun_write(evutil_socket_t fd, short what, void * data);
-struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd);
+void sb_do_tcp_accept(evutil_socket_t listen_fd, short what, void * app);
+void sb_do_tcp_read(evutil_socket_t fd, short what, void * conn);
+void sb_do_tcp_write(evutil_socket_t fd, short what, void * conn);
+void sb_do_udp_read(evutil_socket_t fd, short what, void * app);
+void sb_do_udp_write(evutil_socket_t fd, short what, void * app);
+void sb_do_tun_read(evutil_socket_t fd, short what, void * app);
+void sb_do_tun_write(evutil_socket_t fd, short what, void * app);
+struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, struct sockaddr_in peer);
 void sb_connection_del(struct sb_connection * conn);
 void sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pkg);
 
@@ -141,10 +150,14 @@ void sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * p
 struct sb_app {
     struct sb_config * config;
     int tun_fd;
+    int udp_fd;
 
     struct event_base * eventbase;
+
     struct event * tun_readevent;
     struct event * tun_writeevent;
+    struct event * udp_readevent;
+    struct event * udp_writeevent;
 
     TAILQ_HEAD(, sb_connection) conns;
 };
