@@ -25,17 +25,11 @@ void log_set_quiet(int enable) {
   sb_logger.quiet = enable ? 1 : 0;
 }
 
-void log_log(int l, const char *file, int line, const char *fmt, ...) {
-  /* Get current time */
-  time_t t = time(NULL);
-  struct tm *lt = localtime(&t);
-
+void log_log(int l, const char *file, int line, const char * func, const char *fmt, ...) {
   /* Log to stderr */
   if (!sb_logger.quiet) {
     va_list args;
-    char buf[16];
-    buf[strftime(buf, sizeof(buf), "%H:%M:%S", lt)] = '\0';
-    fprintf(stderr, "%s %-5s %s:%d: ", buf, lvl[l], file, line);
+    fprintf(stderr, "%-5s %s:%d:%s: ", lvl[l], file, line, func);
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);
     va_end(args);
@@ -45,9 +39,7 @@ void log_log(int l, const char *file, int line, const char *fmt, ...) {
   /* Log to file */
   if (sb_logger.fp) {
     va_list args;
-    char buf[32];
-    buf[strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", lt)] = '\0';
-    fprintf(sb_logger.fp, "%s %-5s %s:%d: ", buf, lvl[l], file, line);
+    fprintf(sb_logger.fp, "%-5s %s:%d:%s: ", lvl[l], file, line, func);
     va_start(args, fmt);
     vfprintf(sb_logger.fp, fmt, args);
     va_end(args);

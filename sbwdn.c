@@ -247,7 +247,7 @@ void sb_connection_del(struct sb_connection * conn) {
 void sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pkg) {
     struct sb_app * app = conn->app;
     char buf[INET_ADDRSTRLEN];
-    
+
     switch(conn->net_state) {
         case CONNECTED:
             // this is the init package, contains client ip
@@ -259,7 +259,7 @@ void sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * p
             }
             sb_connection_set_vpn_peer(conn, *((struct in_addr *)pkg->ipdata));
             inet_ntop(AF_INET, (const void *)&(conn->peer_vpn_addr), buf, sizeof(buf));
-            log_info("peer addr is %s", buf);
+            log_info("vpn peer addr is %s", buf);
             if ((app->config->mask.s_addr & app->config->addr.s_addr) != (app->config->mask.s_addr & conn->peer_vpn_addr.s_addr)) {
                 log_warn("invalide peer address(not same sub network) in init package: %s", buf);
                 close(conn->net_fd);
@@ -273,10 +273,10 @@ void sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * p
                 // packages_n2t full
                 log_warn("queue full for %s, dropping", conn->desc);
             } else {
-                log_debug("queue a pkg from net %s", conn->desc);
+                log_trace("queue a pkg from net %s", conn->desc);
                 TAILQ_INSERT_TAIL(&(conn->packages_n2t), pkg, entries);
                 conn->n2t_pkg_count++;
-                log_debug("n2t_pkg_count is %d after inert", conn->n2t_pkg_count);
+                log_trace("n2t_pkg_count is %d after inert", conn->n2t_pkg_count);
             }
             break;
         case TERMINATED:
@@ -325,11 +325,11 @@ int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
         log_warn("invalid read_buf->state: %d", read_buf->state);
         return -1;
     }
-    log_debug("trying to read %d bytes from %s", buflen, read_buf->conn->desc);
+    log_trace("trying to read %d bytes from %s", buflen, read_buf->conn->desc);
     int ret = recv(fd, read_buf->cur_p, buflen, 0);
     if (ret < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            log_debug("no more data available from %s", read_buf->conn->desc);
+            log_trace("no more data available from %s", read_buf->conn->desc);
             return 0;
         } else {
             // error
@@ -340,7 +340,7 @@ int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
         // EOF
         return 2;
     } else {
-        log_debug("read %d bytes from %s", ret, read_buf->conn->desc);
+        log_trace("read %d bytes from %s", ret, read_buf->conn->desc);
         // some bytes were read
         if (ret < buflen) {
             // read less than we want
@@ -377,7 +377,7 @@ int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
 
 int sb_net_io_buf_write(struct sb_net_io_buf * write_buf, int fd) {
     int buflen = SB_NET_BUF_HEADER_SIZE + write_buf->pkg_len - (write_buf->cur_p - (const char *)write_buf->buf);
-    log_debug("writing %d bytes to %s", buflen, write_buf->conn->desc);
+    log_trace("writing %d bytes to %s", buflen, write_buf->conn->desc);
     int ret = send(fd, write_buf->cur_p, buflen, 0);
     if (ret < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -402,8 +402,8 @@ void sb_do_tcp_read(evutil_socket_t fd, short what, void * data) {
     struct sb_app * app = conn->app;
 
     /* read net fd, until error/EOF/EAGAIN */
+    log_enter_func();
     while (1) {
-        log_trace("reading a package from net %s", conn->desc);
         int ret = sb_net_io_buf_read(read_buf, fd);
         if (ret < 0) {
             log_error("failed to read from %s", conn->desc);
@@ -423,11 +423,13 @@ void sb_do_tcp_read(evutil_socket_t fd, short what, void * data) {
             break;
         }
     }
-    
+
     if (conn->n2t_pkg_count > 0) {
         log_debug("enabling tun write");
         event_add(app->tun_writeevent, 0);
     }
+    log_exit_func();
+    return;
 }
 
 void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
@@ -441,8 +443,8 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
     bool enable_tun_write = false;
 
     int ret;
+    log_enter_func();
     while(1) {
-        log_trace("reading a package from udp");
         addrlen = sizeof(peer_addr);
         ret = recvfrom(fd, &buf, sizeof(struct sb_net_buf), 0, (struct sockaddr *)&peer_addr, &addrlen);
         if (ret < 0) {
@@ -514,6 +516,8 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
     if (enable_tun_write) {
         event_add(app->tun_writeevent, 0);
     }
+    log_exit_func();
+    return;
 }
 
 void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
@@ -521,13 +525,13 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
     struct sb_net_io_buf * write_buf = &conn->net_write_io_buf;
     bool disable_net_write = false;
 
+    log_enter_func();
     while (1) {
-        log_trace("writing a package to net %s", conn->desc);
         if (!(write_buf->cur_pkg)) {
             /* prepare data for write_buf */
             write_buf->cur_pkg = TAILQ_FIRST(&(conn->packages_t2n));
             if (!write_buf->cur_pkg) {
-                log_debug("no pkg ready to be sent to net %s", conn);
+                log_trace("no pkg ready to be sent to net %s", conn);
                 disable_net_write = true;
                 break;
             }
@@ -556,6 +560,7 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
         log_debug("disabling tcp write of %s", conn->desc);
         event_del(conn->net_writeevent);
     }
+    log_exit_func();
     return;
 }
 
@@ -568,8 +573,8 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
     int ret;
     bool disable_net_write = false;
 
+    log_enter_func();
     while(1) {
-        log_trace("writing a package to udp");
         /* prepare a buf */
         struct sb_connection * conn;
         struct sb_package * pkg = 0;
@@ -580,6 +585,7 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
             }
         }
         if (!pkg) {
+            log_trace("no pkg available in any connection");
             disable_net_write = true;
             break;
         }
@@ -603,6 +609,8 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
         log_debug("disabling udp write");
         event_del(app->udp_writeevent);
     }
+    log_exit_func();
+    return;
 }
 
 void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
@@ -613,8 +621,8 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
     char buf[buflen];
     bool enable_udp_write = false;
 
+    log_enter_func();
     while(1) {
-        log_debug("reading a package from tun");
         tun_frame_size = read(fd, buf, buflen);
         if (tun_frame_size < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -624,13 +632,13 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
             }
             break;
         }
-        log_debug("read %d bytes from tun", tun_frame_size);
+        log_trace("read %d bytes from tun", tun_frame_size);
 
         struct sb_tun_pi pi = *(struct sb_tun_pi *)buf;
         pi.flags = ntohs(pi.flags);
         pi.proto = ntohs(pi.proto);
-        log_debug("flags in tun_pi:%04x", pi.flags);
-        log_debug("proto in tun_pi:%04x", pi.proto);
+        log_trace("flags in tun_pi:%04x", pi.flags);
+        log_trace("proto in tun_pi:%04x", pi.proto);
         if (pi.proto != PROTO_IPV4) {
             log_debug("unsupported protocol %04x", pi.proto);
             continue;
@@ -644,7 +652,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
         unsigned int ipdatalen = tun_frame_size - sizeof(struct sb_tun_pi);
         char srcbuf[INET_ADDRSTRLEN];
         char dstbuf[INET_ADDRSTRLEN];
-        log_debug("src addr: %s, dest addr: %s, ip pkg len: %d",
+        log_trace("src addr: %s, dest addr: %s, ip pkg len: %d",
                 inet_ntop(AF_INET, (const void *)&saddr, srcbuf, sizeof(srcbuf)),
                 inet_ntop(AF_INET, (const void *)&daddr, dstbuf, sizeof(dstbuf)),
                 ipdatalen);
@@ -652,7 +660,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
         struct sb_connection * conn;
         TAILQ_FOREACH(conn, &(app->conns), entries) {
             bool enable_net_write = false;
-            log_debug("conn addr: %d, pkg addr: %d", conn->peer_vpn_addr.s_addr, daddr.s_addr);
+            log_trace("conn addr: %d, pkg addr: %d", conn->peer_vpn_addr.s_addr, daddr.s_addr);
             if (app->config->app_mode == CLIENT || conn->peer_vpn_addr.s_addr == daddr.s_addr) {
                 if (conn->t2n_pkg_count >= SB_PKG_BUF_MAX) {
                     /* should I send a ICMP or something? */
@@ -662,7 +670,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
                         log_error("failed to create a sb_package for %s, dropping", conn->desc);
                         break;
                     }
-                    log_debug("queue a pkg from tun for connection %s", conn->desc);
+                    log_trace("queue a pkg from tun for connection %s", conn->desc);
                     TAILQ_INSERT_TAIL(&(conn->packages_t2n), pkg, entries);
                     conn->t2n_pkg_count++;
                     enable_net_write = true;
@@ -679,6 +687,8 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
             event_add(app->udp_writeevent, 0);
         }
     }
+    log_exit_func();
+    return;
 }
 
 void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
@@ -687,11 +697,11 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
     /* pick a connection that has package pending in packages_n2t */
     struct sb_connection * conn;
 
+    log_enter_func();
     while(1) {
-        log_debug("writing a package to tun");
         struct sb_package * pkg = 0;
         TAILQ_FOREACH(conn, &(app->conns), entries) {
-            log_debug("n2t_pkg_count is %d %s", conn->n2t_pkg_count, conn->desc);
+            log_trace("n2t_pkg_count is %d %s", conn->n2t_pkg_count, conn->desc);
             if (conn->n2t_pkg_count > 0) {
                 pkg = TAILQ_FIRST(&(conn->packages_n2t));
                 if (pkg) {
@@ -704,7 +714,7 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
             break;
         }
         /* send that package into tun */
-        log_debug("sending a pkg with length %d to tun", pkg->ipdatalen);
+        log_trace("sending a pkg with length %d to tun", pkg->ipdatalen);
         int ret = write(fd, pkg->ipdata, pkg->ipdatalen);
         if (ret < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -714,16 +724,17 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
                 break;
             }
         } else {
-            log_debug("sent a pkg with length %d to tun", ret);
+            log_trace("sent a pkg with length %d to tun", ret);
             TAILQ_REMOVE(&(conn->packages_n2t), pkg, entries);
             conn->n2t_pkg_count--;
-            log_debug("n2t_pkg_count is %d after remove", conn->n2t_pkg_count);
+            log_trace("n2t_pkg_count is %d after remove", conn->n2t_pkg_count);
         }
     }
     if (disable_tun_write) {
-        log_debug("disabling udp write");
+        log_debug("disabling tun write");
         event_del(app->tun_writeevent);
     }
+    log_exit_func();
 }
 
 struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_file) {
