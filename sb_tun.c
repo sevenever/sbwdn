@@ -18,8 +18,9 @@
 #include <errno.h>
 #include <arpa/inet.h>
 
-#include "sb_tun.h"
+#include "sb_util.h"
 #include "sb_log.h"
+#include "sb_tun.h"
 
 int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu) {
     int fd, ret;
@@ -28,7 +29,7 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
 #ifdef __linux__
     char *clonedev = "/dev/net/tun";
     if( (fd = open(clonedev, O_RDWR)) < 0 ) {
-        log_error("failed to open tun clone device %s: %d %s", clonedev, errno, strerror(errno));
+        log_error("failed to open tun clone device %s: %s", clonedev, sb_util_strerror(errno));
         return fd;
     }
     memset(&ifr, 0, sizeof(ifr));
@@ -38,7 +39,7 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
 
     /* try to create the device */
     if( (ret = ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0 ) {
-        log_error("failed to create the tun device: %d %s.%s", errno, strerror(errno), (errno == EPERM ? " Are you root?" : ""));
+        log_error("failed to create the tun device: %s.%s", sb_util_strerror(errno), (errno == EPERM ? " Are you root?" : ""));
         close(fd);
         return ret;
     }
@@ -51,7 +52,7 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
         snprintf(tun_dev, sizeof(tun_dev), "/dev/tun%d", tun_id);
         log_info("trying to open %s", tun_dev);
         if( (fd = open(tun_dev, O_RDWR)) < 0 ) {
-            log_error("failed to open tun clone device %s: %d %s", tun_dev, errno, strerror(errno));
+            log_error("failed to open tun clone device %s: %s", tun_dev, sb_util_strerror(errno));
         } else {
             log_info("opened tun device %s", tun_dev);
             break;
@@ -96,7 +97,7 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
     ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *addr;
     ret = ioctl(s, SIOCSIFADDR, &ifr);
     if (ret < 0) {
-        log_error("failed to set address for tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));
+        log_error("failed to set address for tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
         return -1;
     }
     log_info("set address for tun to %s", addrstr);
@@ -106,7 +107,7 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
     ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *mask;
     ret = ioctl(s, SIOCSIFNETMASK, &ifr);
     if (ret < 0) {
-        log_error("failed to set net mask for tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));
+        log_error("failed to set net mask for tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
         return -1;
     }
     log_info("set mask for tun to %s", addrstr);
@@ -114,13 +115,13 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
     log_info("bring tun up");
     ret = ioctl(s, SIOCGIFFLAGS, &ifr);
     if (ret < 0) {
-        log_error("failed to get flags for tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));
+        log_error("failed to get flags for tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
         return -1;
     }
     ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
     ret = ioctl(s, SIOCSIFFLAGS, &ifr);
     if (ret < 0) {
-        log_error("failed bring up tun interface %s: %d %s", ifr.ifr_name, errno, strerror(errno));
+        log_error("failed bring up tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
         return -1;
     }
     log_info("brought tun up");
@@ -129,7 +130,7 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
     ifr.ifr_mtu = mtu;
     ret = ioctl(s, SIOCSIFMTU, &ifr);
     if (ret < 0) {
-        log_error("failed set mtu to %d for tun interface %s: %d %s", mtu, ifr.ifr_name, errno, strerror(errno));
+        log_error("failed set mtu to %d for tun interface %s: %s", mtu, ifr.ifr_name, sb_util_strerror(errno));
         return -1;
     }
     log_info("set mtu for tun to %d", mtu);

@@ -18,24 +18,24 @@ int sb_client_socket(unsigned int mode, struct sockaddr_in * server_addr, sockle
     /* Create our listening socket. */
     fd = socket(server_addr->sin_family, (mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
     if (fd < 0) {
-        log_fatal("failed to create client socket: %d %s", errno, strerror(errno));
+        log_fatal("failed to create client socket: %s", errno, sb_util_strerror(errno));
         return -1;
     }
     if (mode == SB_NET_MODE_TCP) {
         int ret = connect(fd, (struct sockaddr *)server_addr, addr_len);
         if (ret<0) {
-            log_fatal("failed to connect to server %d %s", errno, strerror(errno));
+            log_fatal("failed to connect to server %s", sb_util_strerror(errno));
             return -1;
         }
     }
     if (evutil_make_socket_closeonexec(fd) < 0) {
-        log_fatal("failed to set client socket to closeonexec: %d %s", errno, strerror(errno));
+        log_fatal("failed to set client socket to closeonexec: %s", sb_util_strerror(errno));
         return -1;
     }
     /* Set the socket to non-blocking, this is essential in event
      * based programming with libevent. */
     if (evutil_make_socket_nonblocking(fd) < 0) {
-        log_fatal("failed to set client socket to nonblock: %d %s", errno, strerror(errno));
+        log_fatal("failed to set client socket to nonblock: %s", sb_util_strerror(errno));
         return -1;
     }
 
@@ -47,29 +47,29 @@ int sb_server_socket(unsigned int mode, struct sockaddr_in * listen_addr, sockle
     /* Create our listening socket. */
     server_fd = socket(listen_addr->sin_family, (mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
     if (server_fd < 0) {
-        log_fatal("failed to create server socket: %s", strerror(errno));
+        log_fatal("failed to create server socket: %s", sb_util_strerror(errno));
         return -1;
     }
     if (evutil_make_listen_socket_reuseable(server_fd) < 0) {
-        log_fatal("failed to set server socket to reuseable: %s", strerror(errno));
+        log_fatal("failed to set server socket to reuseable: %s", sb_util_strerror(errno));
         return -1;
     }
     if (bind(server_fd, (struct sockaddr *)listen_addr, addr_len) < 0) {
-        log_fatal("failed to bind: %s", strerror(errno));
+        log_fatal("failed to bind: %s", sb_util_strerror(errno));
         return -1;
     }
     if (mode == SB_NET_MODE_TCP && listen(server_fd, 5) < 0) {
-        log_fatal("failed to listen: %s", strerror(errno));
+        log_fatal("failed to listen: %s", sb_util_strerror(errno));
         return -1;
     }
     if (evutil_make_socket_closeonexec(server_fd) < 0) {
-        log_fatal("failed to set server socket to closeonexec: %s", strerror(errno));
+        log_fatal("failed to set server socket to closeonexec: %s", sb_util_strerror(errno));
         return -1;
     }
     /* Set the socket to non-blocking, this is essential in event
      * based programming with libevent. */
     if (evutil_make_socket_nonblocking(server_fd) < 0) {
-        log_fatal("failed to set server socket to nonblock: %s", strerror(errno));
+        log_fatal("failed to set server socket to nonblock: %s", sb_util_strerror(errno));
         return -1;
     }
 
@@ -79,7 +79,7 @@ int sb_server_socket(unsigned int mode, struct sockaddr_in * listen_addr, sockle
 int sb_net_io_buf_init(struct sb_net_io_buf * io_buf, struct sb_connection * conn) {
     io_buf->buf = malloc(sizeof(struct sb_net_buf));
     if (!io_buf->buf) {
-        log_error("failed to allocate a sb_net_buf %d %s", errno, strerror(errno));
+        log_error("failed to allocate a sb_net_buf %s", sb_util_strerror(errno));
         return -1;
     }
     io_buf->state = HDR;
@@ -120,7 +120,7 @@ int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
             return 0;
         } else {
             // error
-            log_error("failed to receive data from connection %s: %d %s", read_buf->conn->desc, ret, strerror(ret));
+            log_error("failed to receive data from connection %s: %s", read_buf->conn->desc, sb_util_strerror(ret));
             return -1;
         }
     } else if (ret == 0) {
@@ -188,14 +188,13 @@ void sb_do_tcp_accept(evutil_socket_t listen_fd, short what, void * data) {
     socklen_t addr_len = sizeof(client_addr);
     int client_fd = accept(listen_fd, (struct sockaddr*)&client_addr, (socklen_t*)&addr_len);
     if (client_fd < 0) {
-        log_error("failed to accept: %s", strerror(errno));
+        log_error("failed to accept: %s", sb_util_strerror(errno));
         return;
     } else {
-        char addr[INET_ADDRSTRLEN];
-        log_info("accepted connection from %s.", inet_ntop(client_addr.ss_family, (const void*)&(((struct sockaddr_in *)&client_addr)->sin_addr), addr, sizeof(addr)));
+        log_info("accepted connection from %s.", sb_util_human_endpoint((struct sockaddr *)&client_addr));
 
         if (evutil_make_socket_nonblocking(client_fd) < 0) {
-            log_error("failed to set client socket to nonblock: %s", strerror(errno));
+            log_error("failed to set client socket to nonblock: %s", sb_util_strerror(errno));
             close(client_fd);
             return;
         }
@@ -376,7 +375,6 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
     struct sockaddr_in peer_addr;
     unsigned int addrlen;
 
-    char addrstr[INET_ADDRSTRLEN];
     bool enable_tun_write = false;
     bool enable_net_write = false;
 
@@ -389,13 +387,12 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
             if (errno == EAGAIN && errno == EWOULDBLOCK) {
                 /* not readable, just wait */
             } else {
-                log_error("failed to receive a udp package from net %d %s", errno, strerror(errno));
+                log_error("failed to receive a udp package from net %s", sb_util_strerror(errno));
             }
             break;
         }
-        inet_ntop(AF_INET, &peer_addr, addrstr, sizeof(addrstr));
         if (ret == 0) {
-            log_warn("received a 0 length udp package from %s", addrstr);
+            log_warn("received a 0 length udp package from %s", sb_util_human_endpoint((struct sockaddr *)&peer_addr));
             break;
         }
         if (peer_addr.sin_family != AF_INET || addrlen != sizeof(struct sockaddr_in)) {
@@ -404,7 +401,7 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
         }
         unsigned short pkg_len = ntohl(buf.len_buf);
         if (pkg_len != ret - SB_NET_BUF_HEADER_SIZE) {
-            log_warn("received udp package length(%d) != declared length(%d) from %s", ret - SB_NET_BUF_HEADER_SIZE, pkg_len, addrstr);
+            log_warn("received udp package length(%d) != declared length(%d) from %s", ret - SB_NET_BUF_HEADER_SIZE, pkg_len, sb_util_human_endpoint((struct sockaddr *)&peer_addr));
             break;
         }
         // full package is read
@@ -424,7 +421,7 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
             }
             conn = sb_connection_new(app, fd, SB_NET_MODE_UDP, peer_addr);
             if (!conn) {
-                log_error("failed to init connection for client %s", addrstr);
+                log_error("failed to init connection for client %s", sb_util_human_endpoint((struct sockaddr *)&peer_addr));
                 break;
             }
             /* queue a cookie to send to client */

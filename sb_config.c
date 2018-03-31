@@ -8,6 +8,7 @@
 #include <confuse.h>
 
 #include "sb_log.h"
+#include "sb_util.h"
 #include "sb_config.h"
 
 struct sb_config * sb_config_read(const char * config_file) {
@@ -18,7 +19,7 @@ struct sb_config * sb_config_read(const char * config_file) {
     do {
         config = (struct sb_config *)malloc(sizeof(struct sb_config));
         if (!config) {
-            log_error("failed to allocate memory for sb_config: %d %s", errno, strerror(errno));
+            log_error("failed to allocate memory for sb_config: %s", sb_util_strerror(errno));
             failed = 1;
             break;
         }
@@ -43,7 +44,7 @@ struct sb_config * sb_config_read(const char * config_file) {
         cfg = cfg_init(opts, CFGF_NONE);
         int parse_ret = cfg_parse(cfg, config_file);
         if (parse_ret == CFG_FILE_ERROR) {
-            log_fatal("warning: configuration file [%s] could not be read: %s\n", config_file, strerror(errno));
+            log_fatal("warning: configuration file [%s] could not be read: %s\n", config_file, sb_util_strerror(errno));
             failed = 1;
             break;
         } else if (parse_ret == CFG_PARSE_ERROR) {

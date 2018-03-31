@@ -15,12 +15,12 @@
 struct sb_package * sb_package_new(unsigned int type, void * ipdata, int ipdatalen) {
     struct sb_package * p = malloc(sizeof(struct sb_package));
     if (!p) {
-        log_error("fail to allocate memory for sb_package, %s", strerror(errno));
+        log_error("fail to allocate memory for sb_package, %s", sb_util_strerror(errno));
         return 0;
     }
     p->ipdata = malloc(ipdatalen);
     if (!p->ipdata) {
-        log_error("fail to allocate memory for sb_package->ipdata, %s", strerror(errno));
+        log_error("fail to allocate memory for sb_package->ipdata, %s", sb_util_strerror(errno));
         return 0;
     }
 
@@ -34,7 +34,7 @@ struct sb_package * sb_package_new(unsigned int type, void * ipdata, int ipdatal
 struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, unsigned int mode, struct sockaddr_in peer) {
     struct sb_connection * conn = malloc(sizeof(struct sb_connection));
     if (!conn) {
-        log_error("failed to allocate connection object %s", strerror(errno));
+        log_error("failed to allocate connection object %s", sb_util_strerror(errno));
         return 0;
     }
     memset(conn, 0, sizeof(struct sb_connection));
@@ -71,11 +71,9 @@ struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, uns
         return 0;
     }
 
-    char buf[INET_ADDRSTRLEN];
-    snprintf(conn->desc, SB_CONN_DESC_MAX, "%s[%s:%d(%s)]",
+    snprintf(conn->desc, SB_CONN_DESC_MAX, "%s[%s(%s)]",
             (conn->app->config->net_mode == SB_NET_MODE_TCP ? "TCP" : "UDP"),
-            inet_ntop(AF_INET, &conn->peer_addr.sin_addr, buf, sizeof(buf)),
-            conn->peer_addr.sin_port,
+            sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr),
             "-");
 
     TAILQ_INSERT_TAIL(&(app->conns), conn, entries);
@@ -132,14 +130,12 @@ void sb_connection_del(struct sb_connection * conn) {
 
 void sb_connection_set_vpn_peer(struct sb_connection * conn, struct in_addr peer_vpn_addr) {
     conn->peer_vpn_addr = peer_vpn_addr;
-    char buf[INET_ADDRSTRLEN];
-    char vpnbuf[INET_ADDRSTRLEN];
+    char vpnbuf[INET6_ADDRSTRLEN];
     snprintf(conn->desc,
             SB_CONN_DESC_MAX,
-            "%s[%s:%d(%s)]",
+            "%s[%s(%s)]",
             (conn->app->config->net_mode == SB_NET_MODE_TCP ? "TCP" : "UDP"),
-            inet_ntop(AF_INET, &conn->peer_addr.sin_addr, buf, sizeof(buf)),
-            ntohs(conn->peer_addr.sin_port),
+            sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr),
             inet_ntop(AF_INET, &conn->peer_vpn_addr, vpnbuf, sizeof(vpnbuf)));
 }
 

@@ -53,7 +53,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
 
             } else {
-                log_error("failed to receive package from tun: %d %s", errno, strerror(errno));
+                log_error("failed to receive package from tun: %s", sb_util_strerror(errno));
             }
             break;
         }
@@ -73,12 +73,9 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
         struct in_addr saddr = *(struct in_addr *)&(iphdr->saddr);
         struct in_addr daddr = *(struct in_addr *)&(iphdr->daddr);
         unsigned int ipdatalen = tun_frame_size - sizeof(struct sb_tun_pi);
-        char srcbuf[INET_ADDRSTRLEN];
-        char dstbuf[INET_ADDRSTRLEN];
-        log_trace("src addr: %s, dest addr: %s, ip pkg len: %d",
-                inet_ntop(AF_INET, (const void *)&saddr, srcbuf, sizeof(srcbuf)),
-                inet_ntop(AF_INET, (const void *)&daddr, dstbuf, sizeof(dstbuf)),
-                ipdatalen);
+        log_trace("src addr: %s", sb_util_human_addr(AF_INET, &saddr));
+        log_trace("dst addr: %s", sb_util_human_addr(AF_INET, &daddr));
+        log_trace("ip pkg len: %d", ipdatalen);
 
         struct sb_connection * conn;
         TAILQ_FOREACH(conn, &(app->conns), entries) {
@@ -147,7 +144,7 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
             } else {
-                log_error("failed to write to tun device: %d %s", errno, strerror(errno));
+                log_error("failed to write to tun device: %s", sb_util_strerror(errno));
                 break;
             }
         } else {
@@ -170,7 +167,7 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
 struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_file) {
     struct sb_app * app = malloc(sizeof(struct sb_app));
     if (!app) {
-        log_error("failed to allocate memory for sb_app: %s", strerror(errno));
+        log_error("failed to allocate memory for sb_app: %s", sb_util_strerror(errno));
         return 0;
     }
 
@@ -390,7 +387,7 @@ int main(int argc, char ** argv) {
 
     eventbase = event_base_new();
     if (!eventbase) {
-        log_fatal("failed to init eventbase: %s", strerror(errno));
+        log_fatal("failed to init eventbase: %s", sb_util_strerror(errno));
         return 1;
     }
 
@@ -415,7 +412,7 @@ int main(int argc, char ** argv) {
         return 1;
     }
     if (evutil_make_socket_nonblocking(tun_fd) < 0) {
-        log_fatal("failed to set tun_fd to nonblock: %s", strerror(errno));
+        log_fatal("failed to set tun_fd to nonblock: %s", sb_util_strerror(errno));
         return -1;
     }
     app->tun_fd = tun_fd;
