@@ -568,7 +568,7 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
         log_debug("writing a pkg with legnth %d to %s", frame_size, conn->desc);
         ret = sendto(fd, &buf, frame_size, 0, (const struct sockaddr *)&conn->peer_addr, sizeof(conn->peer_addr));
         if (ret < 0) {
-            log_error("failed to send package to %s: %s, dropping", sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr), sb_util_strerror(errno));
+            log_debug("failed to send package to %s: %s, dropping", sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr), sb_util_strerror(errno));
         } else {
             if (ret < frame_size) {
                 log_warn("send truncated package to %s", sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr));

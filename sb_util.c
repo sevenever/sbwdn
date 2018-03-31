@@ -38,14 +38,16 @@ const char * sb_util_human_endpoint(struct sockaddr * addr) {
     /* 1 for :, 8 for port number */
     static char buf[(INET_ADDRSTRLEN > INET6_ADDRSTRLEN ? INET_ADDRSTRLEN : INET6_ADDRSTRLEN) + 1 + 8];
 
+    void * addrp;
     unsigned short port;
     if (addr->sa_family == AF_INET) {
+        addrp = &((struct sockaddr_in *)addr)->sin_addr;
         port = ((struct sockaddr_in *)addr)->sin_port;
     } else {
+        addrp = &((struct sockaddr_in6 *)addr)->sin6_addr;
         port = ((struct sockaddr_in6 *)addr)->sin6_port;
     }
-
-    snprintf(buf, sizeof(buf), "%s:%d", sb_util_human_addr(addr->sa_family, addr), ntohs(port));
+    snprintf(buf, sizeof(buf), "%s:%d", sb_util_human_addr(addr->sa_family, addrp), ntohs(port));
 
     return buf;
 }
@@ -53,7 +55,7 @@ const char * sb_util_human_endpoint(struct sockaddr * addr) {
 const char * sb_util_strerror(int errnum) {
     static char buf[256];
 
-    sprintf("%d: %s", buf, sizeof(buf), errnum, strerror(errnum));
+    snprintf(buf, sizeof(buf), "%d: %s", errnum, strerror(errnum));
 
     return buf;
 }
