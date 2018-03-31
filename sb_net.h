@@ -64,7 +64,9 @@ struct __attribute__ ((packed)) sb_net_buf {
 
 struct __attribute__ ((packed)) sb_cookie_pkg_data {
     char cookie[SB_COOKIE_SIZE];
-    struct in_addr vpn_addr;
+    struct in_addr server_vpn_addr;
+    struct in_addr client_vpn_addr;
+    struct in_addr netmask;
 };
 
 /* ------------------------------------------------------------------------------------------------

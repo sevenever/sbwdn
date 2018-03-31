@@ -41,6 +41,16 @@ void sb_conn_handle_keepalive(struct sb_connection * conn, struct sb_package * p
 
 void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg);
 
+/*
+ * find a available vpn addr as client addr
+ * if not found, return 0.0.0.0
+ */
+struct in_addr sb_find_a_addr_lease(struct sb_app * app);
+
+/*
+ * check if a vpn addr is used by a connection
+ * return 1 if used, 0 if not used
+ */
 int sb_vpn_addr_used(struct sb_app * app, struct in_addr vpn_addr);
 
 #endif

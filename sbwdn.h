@@ -3,6 +3,7 @@
 
 #include <sys/queue.h>
 #include <event2/event.h>
+#include <net/if.h>
 
 #include "sb_config.h"
 #include "sb_net.h"
@@ -21,6 +22,8 @@ struct sb_app {
     struct sb_config * config;
     int tun_fd;
     int udp_fd;
+
+    char tunname[IFNAMSIZ];
 
     struct event_base * eventbase;
 

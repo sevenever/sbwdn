@@ -29,6 +29,7 @@ struct sb_config * sb_config_read(const char * config_file) {
         cfg_opt_t opts[] =
         {
             CFG_STR("mode", "", CFGF_NONE),
+            CFG_STR("dev", "", CFGF_NONE),
             CFG_STR("net", "udp", CFGF_NONE),
             CFG_STR("bind", "", CFGF_NONE),
             CFG_STR("remote", "", CFGF_NONE),
@@ -68,6 +69,9 @@ struct sb_config * sb_config_read(const char * config_file) {
         }
         log_info("app mode %s mode", app_mode_str);
 
+        strncpy(config->dev, cfg_getstr(cfg, "dev"), sizeof(config->dev));
+        log_info("device name in config file: [%s]", config->dev);
+
         const char * app_net_str = cfg_getstr(cfg, "net");
         if (strcmp(app_net_str, "tcp") == 0) {
             config->net_mode = SB_NET_MODE_TCP;
@@ -104,6 +108,30 @@ struct sb_config * sb_config_read(const char * config_file) {
                 break;
             }
             log_info("bind address is %s", bind_str);
+
+            const char * addr_str = cfg_getstr(cfg, "addr");
+            if (strlen(addr_str) == 0) {
+                log_fatal("addr is required");
+                failed = 1;
+                break;
+            } else if (inet_pton(AF_INET, addr_str, &config->addr) <= 0) {
+                log_fatal("failed to parse addr address %s", addr_str);
+                failed = 1;
+                break;
+            }
+            log_info("local address is %s", addr_str);
+
+            const char * mask_str = cfg_getstr(cfg, "mask");
+            if (strlen(mask_str) == 0) {
+                log_fatal("mask is required");
+                failed = 1;
+                break;
+            } else if (inet_pton(AF_INET, mask_str, &config->mask) <= 0) {
+                log_fatal("failed to parse mask %s", mask_str);
+                failed = 1;
+                break;
+            }
+            log_info("network mask is %s", mask_str);
         } else {
             strncpy(config->remote, cfg_getstr(cfg, "remote"), sizeof(config->remote));
             if (strlen(config->remote) == 0) {
@@ -115,31 +143,7 @@ struct sb_config * sb_config_read(const char * config_file) {
         }
 
         config->port = cfg_getint(cfg, "port");
-        log_info("bind port is %d", config->port);
-
-        const char * addr_str = cfg_getstr(cfg, "addr");
-        if (strlen(addr_str) == 0) {
-            log_fatal("addr is required");
-            failed = 1;
-            break;
-        } else if (inet_pton(AF_INET, addr_str, &config->addr) <= 0) {
-            log_fatal("failed to parse addr address %s", addr_str);
-            failed = 1;
-            break;
-        }
-        log_info("local address is %s", addr_str);
-
-        const char * mask_str = cfg_getstr(cfg, "mask");
-        if (strlen(mask_str) == 0) {
-            log_fatal("mask is required");
-            failed = 1;
-            break;
-        } else if (inet_pton(AF_INET, mask_str, &config->mask) <= 0) {
-            log_fatal("failed to parse mask %s", mask_str);
-            failed = 1;
-            break;
-        }
-        log_info("network mask is %s", mask_str);
+        log_info("net port is %d", config->port);
 
         config->mtu = cfg_getint(cfg, "mtu");
 

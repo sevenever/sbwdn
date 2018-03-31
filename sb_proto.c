@@ -9,6 +9,7 @@
 #include "sb_util.h"
 #include "sb_proto.h"
 #include "sb_net.h"
+#include "sb_tun.h"
 #include "sbwdn.h"
 
 
@@ -139,6 +140,42 @@ void sb_connection_set_vpn_peer(struct sb_connection * conn, struct in_addr peer
             inet_ntop(AF_INET, &conn->peer_vpn_addr, vpnbuf, sizeof(vpnbuf)));
 }
 
+void sb_connection_say_bye(struct sb_connection * conn) {
+    if (conn->net_state == TERMINATED_4) {
+        log_warn("will not say bye in terinated state for %s", conn->desc);
+    } else {
+        log_info("saying bye to %s", conn->desc);
+        /* put a bye package into packages_t2n, so that it can be send to peer */
+        struct sb_package * bye_pkg = sb_package_new(SB_PKG_TYPE_BYE_3, 0, 0);
+        if (!bye_pkg) {
+            log_error("failed to create bye pkg");
+        }
+        TAILQ_INSERT_TAIL(&(conn->packages_t2n), bye_pkg, entries);
+        conn->t2n_pkg_count++;
+        if (conn->app->config->app_mode == CLIENT) {
+            sb_connection_change_net_state(conn, CLOSING_3);
+        }
+    }
+}
+
+void sb_connection_say_hello(struct sb_connection * conn) {
+    if (conn->net_state != NEW_0) {
+        log_error("connection is not in new state %s", conn->desc);
+        return;
+    }
+
+    /* put a initial package into packages_t2n, so that it can be send to server */
+    struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, 0, 0);
+    if (!init_pkg) {
+        log_error("failed to create init pkg");
+        return;
+    }
+    TAILQ_INSERT_TAIL(&(conn->packages_t2n), init_pkg, entries);
+    conn->t2n_pkg_count++;
+    sb_connection_change_net_state(conn, CONNECTED_1);
+    return;
+}
+
 int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pkg) {
     struct sb_app * app = conn->app;
     int queued = 0;
@@ -158,10 +195,20 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 break;
             }
             log_trace("received init pkg from %s", conn->desc);
+            struct in_addr client_vpn_addr;
+            client_vpn_addr = sb_find_a_addr_lease(app);
+            if (client_vpn_addr.s_addr == 0) {
+                log_warn("can not find a vpn address for %s", conn->desc);
+                sb_connection_change_net_state(conn, TERMINATED_4);
+                break;
+            }
+            log_info("letting client use %s %s", sb_util_human_addr(AF_INET, &client_vpn_addr), conn->desc);
             /* generate a cookie package and send to client */
             struct sb_cookie_pkg_data cookie_data;
             memcpy(&cookie_data.cookie, &conn->cookie, SB_COOKIE_SIZE);
-            cookie_data.vpn_addr = app->config->addr;
+            cookie_data.server_vpn_addr = app->config->addr;
+            cookie_data.client_vpn_addr = client_vpn_addr;
+            cookie_data.netmask = app->config->mask;
             struct sb_package * cookie_pkg = sb_package_new(SB_PKG_TYPE_COOKIE_4, &cookie_data, sizeof(struct sb_cookie_pkg_data));
             if (!cookie_pkg) {
                 log_error("failed to create cookie package for %s, disconnecting", conn->desc);
@@ -190,16 +237,24 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 log_info("received a cookie package, replying cookie to %s", conn->desc);
 
                 /* save to conn */
-                sb_connection_set_vpn_peer(conn, cookie->vpn_addr);
+                sb_connection_set_vpn_peer(conn, cookie->client_vpn_addr);
                 memcpy(conn->cookie, cookie->cookie, SB_COOKIE_SIZE);
 
-                /* send back to server, with vpn_addr set to mine */
-                cookie->vpn_addr = app->config->addr;
+                log_info("configuring IP of tun device addr to %s", sb_util_human_addr(AF_INET, &cookie->client_vpn_addr));
+                log_info("configuring netmask of tun device addr to %s", sb_util_human_addr(AF_INET, &cookie->netmask));
+                if(sb_config_tun_addr(app->tunname, &cookie->client_vpn_addr, &cookie->netmask, app->config->mtu) < 0) {
+                    log_warn("failed to configure tun device address, will disconnect");
+                    sb_connection_change_net_state(conn, TERMINATED_4);
+                    break;
+                }
+                /* send back to server*/
                 TAILQ_INSERT_TAIL(&(conn->packages_t2n), pkg, entries);
                 queued = 1;
                 conn->t2n_pkg_count++;
                 sb_connection_change_net_state(conn, ESTABLISHED_2);
-
+                /* we are now indeed connected, stop reconnect here,
+                 * instead in sb_try_client_connect
+                 */
                 sb_stop_reconnect(app);
 
                 break;
@@ -210,13 +265,14 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
             }
-            if (sb_vpn_addr_used(conn->app, cookie->vpn_addr)) {
-                log_warn("requested vpn address %s is in use, disconnecting %s", sb_util_human_addr(AF_INET, &cookie->vpn_addr), conn->desc);
+            /* check if client vpn addr is valid, again */
+            if (sb_vpn_addr_used(conn->app, cookie->client_vpn_addr)) {
+                log_warn("requested vpn address %s is in use, disconnecting %s", sb_util_human_addr(AF_INET, &cookie->client_vpn_addr), conn->desc);
                 sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
             }
             /* cookie is valid, now set client vpn_addr */
-            sb_connection_set_vpn_peer(conn, cookie->vpn_addr);
+            sb_connection_set_vpn_peer(conn, cookie->client_vpn_addr);
             log_info("vpn peer addr is %s", sb_util_human_addr(AF_INET, &conn->peer_vpn_addr));
             sb_connection_change_net_state(conn, ESTABLISHED_2);
             break;
@@ -285,6 +341,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
 void sb_conn_handle_keepalive(struct sb_connection * conn, struct sb_package * pkg) {
     SB_NOT_USED(conn);
     SB_NOT_USED(pkg);
+    log_info("received a keepalive pkg from %s", conn->desc);
 }
 
 void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) {
@@ -292,45 +349,36 @@ void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) 
     SB_NOT_USED(pkg);
 }
 
+struct in_addr sb_find_a_addr_lease(struct sb_app * app) {
+    struct in_addr ret;
+    uint32_t server_addr = app->config->addr.s_addr;
+    uint32_t mask = ntohl(app->config->mask.s_addr);
+    uint32_t cand = ntohl(app->config->addr.s_addr & app->config->mask.s_addr) + 1;
+    int found = 0;
+
+    while((cand | mask) != 0xFFFFFFFF) {
+        ret.s_addr = htonl(cand);
+        if (ret.s_addr != server_addr && !sb_vpn_addr_used(app, ret)) {
+            found = 1;
+            break;
+        }
+        cand++;
+    }
+
+    if (!found) {
+        ret.s_addr = 0;
+    }
+    return ret;
+}
+
 int sb_vpn_addr_used(struct sb_app * app, struct in_addr vpn_addr) {
-    SB_NOT_USED(app);
-    SB_NOT_USED(vpn_addr);
+    struct sb_connection * conn;
+    TAILQ_FOREACH(conn, &(app->conns), entries) {
+        if (conn->peer_vpn_addr.s_addr == vpn_addr.s_addr) {
+            log_debug("%s is used by %s", sb_util_human_addr(AF_INET, &vpn_addr), conn->desc);
+            return 1;
+        }
+    }
     return 0;
 }
 
-void sb_connection_say_bye(struct sb_connection * conn) {
-    if (conn->net_state == TERMINATED_4) {
-        log_warn("will not say bye in terinated state for %s", conn->desc);
-    } else {
-        log_info("saying bye to %s", conn->desc);
-        /* put a bye package into packages_t2n, so that it can be send to peer */
-        struct sb_package * bye_pkg = sb_package_new(SB_PKG_TYPE_BYE_3, 0, 0);
-        if (!bye_pkg) {
-            log_error("failed to create bye pkg");
-        }
-        TAILQ_INSERT_TAIL(&(conn->packages_t2n), bye_pkg, entries);
-        conn->t2n_pkg_count++;
-        if (conn->app->config->app_mode == CLIENT) {
-            sb_connection_change_net_state(conn, CLOSING_3);
-        }
-    }
-}
-
-void sb_connection_say_hello(struct sb_connection * conn) {
-    struct sb_app * app = conn->app;
-    if (conn->net_state != NEW_0) {
-        log_error("connection is not in new state %s", conn->desc);
-        return;
-    }
-
-    /* put a initial package into packages_t2n, so that it can be send to server */
-    struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, (char *)&app->config->addr, sizeof(app->config->addr));
-    if (!init_pkg) {
-        log_error("failed to create init pkg");
-        return;
-    }
-    TAILQ_INSERT_TAIL(&(conn->packages_t2n), init_pkg, entries);
-    conn->t2n_pkg_count++;
-    sb_connection_change_net_state(conn, CONNECTED_1);
-    return;
-}

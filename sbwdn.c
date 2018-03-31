@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <netdb.h>
 #include <signal.h>
+#include <net/if.h>
 
 #include "sb_log.h"
 #include "sb_config.h"
@@ -406,7 +407,17 @@ int main(int argc, char ** argv) {
     event_add(app->sigterm_event, 0);
     event_add(app->sigint_event, 0);
 
-    int tun_fd = setup_tun(&app->config->addr, &app->config->mask, app->config->mtu);
+    if (strncmp(app->config->dev, "auto", IFNAMSIZ) == 0) {
+        log_info("dev in config file is auto, will allow system allocate name");
+        app->tunname[0] = 0;
+    } else if (strncmp(app->config->dev, "", IFNAMSIZ) == 0 ) {
+        log_info("dev in config file is not set, will use "SB_TUN_DEV_NAME);
+        strncpy(app->tunname, SB_TUN_DEV_NAME, sizeof(app->tunname));
+    } else {
+        log_info("dev in config file is %s", app->config->dev);
+        strncpy(app->tunname, app->config->dev, sizeof(app->tunname));
+    }
+    int tun_fd = sb_setup_tun(app->tunname, sizeof(app->tunname));
     if (tun_fd < 0) {
         log_fatal("failed to setup tun device");
         return 1;
@@ -426,6 +437,10 @@ int main(int argc, char ** argv) {
     app->tun_writeevent = tun_writeevent;
 
     if (app->config->app_mode == SERVER) {
+        if (sb_config_tun_addr(app->tunname, &app->config->addr, &app->config->mask, app->config->mtu) < 0) {
+            log_fatal("failed to setup tun address");
+            return 1;
+        }
         struct sockaddr_in listen_addr;
         int server_fd;
         memset(&listen_addr, 0, sizeof(listen_addr));

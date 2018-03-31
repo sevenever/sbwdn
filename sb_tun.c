@@ -22,8 +22,8 @@
 #include "sb_log.h"
 #include "sb_tun.h"
 
-int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu) {
-    int fd, ret;
+int sb_setup_tun(char * tunname, unsigned int len) {
+    int fd;
     struct ifreq ifr;
 
 #ifdef __linux__
@@ -34,14 +34,16 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
     }
     memset(&ifr, 0, sizeof(ifr));
 
-    strncpy(ifr.ifr_name, TUN_DEV_NAME, sizeof(ifr.ifr_name));
+    if (*tunname != 0) {
+        strncpy(ifr.ifr_name, tunname, sizeof(ifr.ifr_name));
+    }
     ifr.ifr_flags = IFF_TUN;
 
     /* try to create the device */
-    if( (ret = ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0 ) {
+    if( (ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0 ) {
         log_error("failed to create the tun device: %s.%s", sb_util_strerror(errno), (errno == EPERM ? " Are you root?" : ""));
         close(fd);
-        return ret;
+        return -1;
     }
     log_info("created tun device %s", ifr.ifr_name);
 #elif defined (__APPLE__)
@@ -63,34 +65,21 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
     }
     /* need to set ifr_name on macos */
     snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "tun%d", tun_id);
+    log_info("openned tun device tun%d", tun_id);
 #endif
+    strncpy(tunname, ifr.ifr_name, len);
 
-#ifdef SB_USE_IPROUTE
-    /* Using "ip" command to set ip of tun interface, I don't know why SIOCSIFADDR not work...
-     * When using SIOCSIFADDR, the package is not routed to the tun interface...
-     */
-    char cmd[1024];
+    return fd;
+}
 
-    log_info("bring up %s", ifr.ifr_name);
-    snprintf(cmd, sizeof(cmd), "/sbin/ip link set dev %s up mtu %d", ifr.ifr_name, mtu);
-    log_info("invoking %s", cmd);
-    ret = system(cmd);
-    if (ret != 0) {
-        log_error("failed to set address for tun interface %s", ifr.ifr_name);
-    }
-
-    log_info("setting address for %s", ifr.ifr_name);
-    snprintf(cmd, sizeof(cmd), "/sbin/ip addr add dev %s local %s peer %s", ifr.ifr_name, addr, paddr);
-    log_info("invoking %s", cmd);
-    ret = system(cmd);
-    if (ret != 0) {
-        log_error("failed to set address for tun interface %s", ifr.ifr_name);
-    }
-#else
+int sb_config_tun_addr(const char * tunname, const struct in_addr * addr, const struct in_addr * mask, int mtu) {
     char addrstr[INET_ADDRSTRLEN];
+    struct ifreq ifr;
+    int ret;
 
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     ifr.ifr_addr.sa_family = AF_INET;
+    strncpy(ifr.ifr_name, tunname, sizeof(ifr.ifr_name));
 
     inet_ntop(AF_INET, addr, addrstr, sizeof(addrstr));
     log_info("setting address for tun to %s", addrstr);
@@ -134,8 +123,7 @@ int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu)
         return -1;
     }
     log_info("set mtu for tun to %d", mtu);
-#endif
 
-    return fd;
+    return 0;
 }
 

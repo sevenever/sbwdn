@@ -14,6 +14,7 @@ enum SB_APP_MODE { SERVER, CLIENT };
 struct sb_config {
     /* client or server */
     enum SB_APP_MODE app_mode;
+    char dev[SB_CONFIG_STR_MAX];
     unsigned int net_mode;
     struct in_addr bind;
     char remote[SB_CONFIG_STR_MAX];
