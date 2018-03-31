@@ -285,6 +285,7 @@ void sb_schedule_reconnect(struct sb_app * app) {
         app->reconnect_event = event_new(app->eventbase, -1, 0, sb_try_client_connect, app);
     }
     struct timeval interval;
+    memset(&interval, 0, sizeof(struct timeval));
     interval.tv_sec = app->retry_interval;
     log_warn("failed to connect to server, will retry in %d seconds", app->retry_interval);
     event_add(app->reconnect_event, &interval);
