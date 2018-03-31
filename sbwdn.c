@@ -341,17 +341,18 @@ void sb_watchdog(evutil_socket_t fd, short what, void * data) {
             if (!ka_pkg) {
                 log_error("failed to create a keepalive package for %s", conn->desc);
             } else {
-            TAILQ_INSERT_TAIL(&(conn->packages_t2n), ka_pkg, entries);
-            conn->t2n_pkg_count++;
-            if (conn->net_mode == SB_NET_MODE_TCP) {
-                if (conn->net_writeevent) {
-                    event_add(conn->net_writeevent, 0);
+                TAILQ_INSERT_TAIL(&(conn->packages_t2n), ka_pkg, entries);
+                conn->t2n_pkg_count++;
+                if (conn->net_mode == SB_NET_MODE_TCP) {
+                    if (conn->net_writeevent) {
+                        event_add(conn->net_writeevent, 0);
+                    }
+                } else {
+                    if (app->udp_writeevent) {
+                        event_add(app->udp_writeevent, 0);
+                    }
                 }
-            } else {
-                if (app->udp_writeevent) {
-                    event_add(app->udp_writeevent, 0);
-                }
-            }
+                conn->since_last_keepalive = 0;
             }
         }
     }
