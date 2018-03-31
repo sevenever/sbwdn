@@ -29,6 +29,8 @@ void sb_connection_set_vpn_peer(struct sb_connection * conn, struct in_addr peer
 
 void sb_connection_say_bye(struct sb_connection * conn);
 
+void sb_connection_say_hello(struct sb_connection * conn);
+
 /* process a package.
  * return 1 if pkg is queued into connection's packages_n2t or packages_t2n(cookie pkg from server)
  * return 0 if pkg is not queued, so caller will need to free pkg in this case.

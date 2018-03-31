@@ -28,6 +28,12 @@ struct sb_app {
     struct event * udp_readevent;
     struct event * udp_writeevent;
 
+    unsigned int retry_interval;
+
+    struct event * reconnect_event;
+
+    int dont_reconnect;
+
     TAILQ_HEAD(, sb_connection) conns;
 };
 

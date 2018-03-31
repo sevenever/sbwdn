@@ -189,6 +189,12 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
     app->udp_readevent = 0;
     app->udp_writeevent = 0;
 
+    app->retry_interval = 1;
+
+    app->reconnect_event = 0;
+
+    app->dont_reconnect = 0;
+
     TAILQ_INIT(&(app->conns));
 
     return app;
@@ -203,6 +209,11 @@ void sb_app_del(struct sb_app * app) {
         conn = conn2;
     }
 
+    if (app->reconnect_event) {
+        event_del(app->reconnect_event);
+        event_free(app->reconnect_event);
+        app->reconnect_event = 0;
+    }
     if (app->udp_writeevent) {
         event_del(app->udp_writeevent);
         event_free(app->udp_writeevent);
@@ -233,13 +244,6 @@ void sb_app_del(struct sb_app * app) {
         event_free(app->sigint_event);
         app->sigint_event = 0;
     }
-    app->udp_writeevent = 0;
-    app->udp_readevent = 0;
-    app->tun_writeevent = 0;
-    app->tun_readevent = 0;
-
-    app->sigterm_event = 0;
-    app->sigint_event = 0;
 
     app->eventbase = 0;
 
@@ -251,6 +255,7 @@ void sb_app_del(struct sb_app * app) {
 }
 
 void sb_stop_app(struct sb_app * app, int immiedately) {
+    app->dont_reconnect = 1;
     if (immiedately) {
         event_base_loopbreak(app->eventbase);
     } else {
@@ -263,7 +268,8 @@ void sb_stop_app(struct sb_app * app, int immiedately) {
         TAILQ_FOREACH(conn, &(app->conns), entries) {
             sb_connection_say_bye(conn);
             if (conn->net_mode == SB_NET_MODE_TCP) {
-                event_add(conn->net_readevent, 0);
+                log_debug("enable net write for %s", conn->desc);
+                event_add(conn->net_writeevent, 0);
             }
         }
         if (app->config->net_mode & SB_NET_MODE_UDP) {
@@ -364,63 +370,8 @@ int main(int argc, char ** argv) {
             }
         }
     } else {
-        int client_fd;
         /* client mode */
-        log_info("connecting to %s:%d", app->config->remote, app->config->port);
-        struct addrinfo hint, *ai, *ai0;
-        memset(&hint, 0, sizeof(hint));
-        hint.ai_family = AF_INET;
-        hint.ai_socktype = (app->config->net_mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM);
-        if (getaddrinfo(app->config->remote, 0, &hint, &ai0)) {
-            log_error("failed to resolve server address %s", app->config->remote);
-            return 1;
-        }
-        client_fd = -1;
-        struct sockaddr_in peer_addr;
-        for(ai=ai0;ai;ai = ai->ai_next) {
-            if (ai->ai_family == AF_INET) {
-                ((struct sockaddr_in *)(ai->ai_addr))->sin_port = htons(app->config->port);
-                if ((client_fd = sb_client_socket(app->config->net_mode, (struct sockaddr_in *)ai->ai_addr, ai->ai_addrlen)) < 0) {
-                    log_fatal("failed to setup client socket");
-                } else {
-                    peer_addr = *((struct sockaddr_in *)(ai->ai_addr));
-                }
-            }
-        }
-        if (client_fd < 0) {
-            return 1;
-        }
-        log_info("connected to %s:%d", app->config->remote, app->config->port);
-        struct sb_connection * conn = sb_connection_new(app, client_fd, app->config->net_mode, peer_addr);
-        if (!conn) {
-            log_error("failed to init connection for net fd %d", client_fd);
-            return 1;
-        }
-        sb_connection_set_vpn_peer(conn, app->config->paddr);
-        /* put a initial package into packages_t2n, so that it can be send to server */
-        struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, (char *)&app->config->addr, sizeof(app->config->addr));
-        if (!init_pkg) {
-            log_error("failed to create init pkg");
-            return 1;
-        }
-        TAILQ_INSERT_TAIL(&(conn->packages_t2n), init_pkg, entries);
-        conn->t2n_pkg_count++;
-        conn->net_state = CONNECTED_1;
-        log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
-        if (app->config->net_mode == SB_NET_MODE_TCP) {
-            event_add(conn->net_readevent, 0);
-            event_add(conn->net_writeevent, 0);
-        } else {
-            struct event * udp_readevent;
-            struct event * udp_writeevent;
-
-            udp_readevent = event_new(eventbase, client_fd, EV_READ|EV_PERSIST, sb_do_udp_read, app);
-            udp_writeevent = event_new(eventbase, client_fd, EV_WRITE|EV_PERSIST, sb_do_udp_write, app);
-            event_add(udp_readevent, 0);
-            event_add(udp_writeevent, 0);
-            app->udp_readevent = udp_readevent;
-            app->udp_writeevent = udp_writeevent;
-        }
+        sb_try_client_connect(-1, 0, app);
     }
 
     /* Start the event loop. */

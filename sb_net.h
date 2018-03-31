@@ -11,9 +11,13 @@
 #define IP_PKG_SIZE_MAX 65536
 
 #define SB_PKG_BUF_MAX 1024
+
 #define SB_CONN_DESC_MAX 1024
 
 #define SB_COOKIE_SIZE 8
+
+/* how long should we wait before next reconnect, max value */
+#define SB_CLIENT_RETRY_INTERVAL_MAX 300
 
 struct iphdr {
     uint8_t    ihl:4,
@@ -185,6 +189,16 @@ struct sb_connection {
 };
 
 void sb_do_tcp_accept(evutil_socket_t listen_fd, short what, void * app);
+
+/* try to connect to server
+ * return 0 if connection is created
+ * return -1 if failed
+ */
+void sb_try_client_connect(evutil_socket_t notused, short what, void * data);
+
+void sb_schedule_reconnect(struct sb_app * app);
+
+void sb_stop_reconnect(struct sb_app * app);
 
 void sb_do_tcp_read(evutil_socket_t fd, short what, void * conn);
 

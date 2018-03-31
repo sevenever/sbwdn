@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <errno.h>
 
 #include "sb_log.h"
 #include "sb_util.h"
@@ -326,3 +327,22 @@ void sb_connection_say_bye(struct sb_connection * conn) {
     }
 }
 
+void sb_connection_say_hello(struct sb_connection * conn) {
+    struct sb_app * app = conn->app;
+    if (conn->net_state != NEW_0) {
+        log_error("connection is not in new state %s", conn->desc);
+        return;
+    }
+
+    /* put a initial package into packages_t2n, so that it can be send to server */
+    struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, (char *)&app->config->addr, sizeof(app->config->addr));
+    if (!init_pkg) {
+        log_error("failed to create init pkg");
+        return;
+    }
+    TAILQ_INSERT_TAIL(&(conn->packages_t2n), init_pkg, entries);
+    conn->t2n_pkg_count++;
+    conn->net_state = CONNECTED_1;
+    log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+    return;
+}
