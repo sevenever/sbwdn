@@ -154,6 +154,7 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
             log_trace("sent a pkg with length %d to tun", ret);
             TAILQ_REMOVE(&(conn->packages_n2t), pkg, entries);
             conn->n2t_pkg_count--;
+            free(pkg->ipdata);
             free(pkg);
             pkg = 0;
             log_trace("n2t_pkg_count is %d after remove", conn->n2t_pkg_count);
@@ -255,8 +256,6 @@ void sb_app_del(struct sb_app * app) {
     }
 
     app->eventbase = 0;
-
-    app->config = 0;
 
     free(app->config);
     app->config = 0;
@@ -410,7 +409,7 @@ int main(int argc, char ** argv) {
     event_add(app->sigterm_event, 0);
     event_add(app->sigint_event, 0);
 
-    int tun_fd = setup_tun(&app->config->addr, &app->config->paddr, &app->config->mask, app->config->mtu);
+    int tun_fd = setup_tun(&app->config->addr, &app->config->mask, app->config->mtu);
     if (tun_fd < 0) {
         log_fatal("failed to setup tun device");
         return 1;

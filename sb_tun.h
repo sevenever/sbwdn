@@ -9,5 +9,5 @@ struct sb_tun_dev {
 
     int tun_fd;
 };
-int setup_tun(const struct in_addr * addr, const struct in_addr * paddr, const struct in_addr * mask, int mtu);
+int setup_tun(const struct in_addr * addr, const struct in_addr * mask, int mtu);
 #endif

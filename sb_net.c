@@ -323,6 +323,7 @@ void sb_do_tcp_read(evutil_socket_t fd, short what, void * data) {
         } else if (ret == 1) {
             if (read_buf->cur_pkg) {
                 if (!sb_conn_net_received_pkg(conn, read_buf->cur_pkg)) {
+                    free(read_buf->cur_pkg->ipdata);
                     free(read_buf->cur_pkg);
                     read_buf->cur_pkg = 0;
                 }
@@ -445,6 +446,7 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
             break;
         }
         if (!sb_conn_net_received_pkg(conn, pkg)) {
+            free(pkg->ipdata);
             free(pkg);
             pkg = 0;
         }
@@ -522,6 +524,7 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
                 } else {
                     TAILQ_REMOVE(&(conn->packages_t2n), writing_pkg, entries);
                     conn->t2n_pkg_count--;
+                    free(writing_pkg->ipdata);
                     free(writing_pkg);
                     writing_pkg = 0;
                 }
@@ -587,6 +590,7 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
         } else {
             TAILQ_REMOVE(&conn->packages_t2n, pkg, entries);
             conn->t2n_pkg_count--;
+            free(pkg->ipdata);
             free(pkg);
             pkg = 0;
         }
