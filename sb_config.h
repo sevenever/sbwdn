@@ -7,12 +7,14 @@
 #define SB_CONFIG_STR_MAX 256
 
 enum SB_APP_MODE { SERVER, CLIENT };
-enum sb_net_mode { TCP, UDP };
+
+#define SB_NET_MODE_TCP 0x01
+#define SB_NET_MODE_UDP 0x02
 
 struct sb_config {
     /* client or server */
     enum SB_APP_MODE app_mode;
-    enum sb_net_mode net_mode;
+    unsigned int net_mode;
     struct in_addr bind;
     char remote[SB_CONFIG_STR_MAX];
     unsigned short port;

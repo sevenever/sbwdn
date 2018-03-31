@@ -9,11 +9,13 @@
 #include <arpa/inet.h>
 #include <stdbool.h>
 #include <netdb.h>
+#include <signal.h>
 
 #include "sb_log.h"
 #include "sb_config.h"
 #include "sbwdn.h"
 #include "sb_tun.h"
+#include "sb_util.h"
 
 
 static void libevent_log(int severity, const char *msg) {
@@ -33,15 +35,15 @@ static void libevent_log(int severity, const char *msg) {
     log_log(lvl, "", 0, "libevent: %s", msg);
 }
 
-static int sb_client_socket(enum sb_net_mode mode, struct sockaddr_in * server_addr, socklen_t addr_len) {
+static int sb_client_socket(unsigned int mode, struct sockaddr_in * server_addr, socklen_t addr_len) {
     int fd;
     /* Create our listening socket. */
-    fd = socket(server_addr->sin_family, (mode == TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
+    fd = socket(server_addr->sin_family, (mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
     if (fd < 0) {
         log_fatal("failed to create client socket: %d %s", errno, strerror(errno));
         return -1;
     }
-    if (mode == TCP) {
+    if (mode == SB_NET_MODE_TCP) {
         int ret = connect(fd, (struct sockaddr *)server_addr, addr_len);
         if (ret<0) {
             log_fatal("failed to connect to server %d %s", errno, strerror(errno));
@@ -62,10 +64,10 @@ static int sb_client_socket(enum sb_net_mode mode, struct sockaddr_in * server_a
     return fd;
 }
 
-static int sb_server_socket(enum sb_net_mode mode, struct sockaddr_in * listen_addr, socklen_t addr_len) {
+static int sb_server_socket(unsigned int mode, struct sockaddr_in * listen_addr, socklen_t addr_len) {
     int server_fd;
     /* Create our listening socket. */
-    server_fd = socket(listen_addr->sin_family, (mode == TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
+    server_fd = socket(listen_addr->sin_family, (mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
     if (server_fd < 0) {
         log_fatal("failed to create server socket: %s", strerror(errno));
         return -1;
@@ -78,7 +80,7 @@ static int sb_server_socket(enum sb_net_mode mode, struct sockaddr_in * listen_a
         log_fatal("failed to bind: %s", strerror(errno));
         return -1;
     }
-    if (mode == TCP && listen(server_fd, 5) < 0) {
+    if (mode == SB_NET_MODE_TCP && listen(server_fd, 5) < 0) {
         log_fatal("failed to listen: %s", strerror(errno));
         return -1;
     }
@@ -114,18 +116,17 @@ void sb_do_tcp_accept(evutil_socket_t listen_fd, short what, void * data) {
                 return;
             }
             struct sb_app * app = data;
-            struct sb_connection * conn = sb_connection_new(app, client_fd, *((struct sockaddr_in *)&client_addr));
+            struct sb_connection * conn = sb_connection_new(app, client_fd, SB_NET_MODE_TCP, *((struct sockaddr_in *)&client_addr));
             if (!conn) {
                 log_error("failed to init connection for net fd %d", client_fd);
                 return;
             }
-            conn->net_state = CONNECTED;
             event_add(conn->net_readevent, 0);
         }
     }
 }
 
-struct sb_package * sb_package_new(unsigned int type, char * ipdata, int ipdatalen) {
+struct sb_package * sb_package_new(unsigned int type, void * ipdata, int ipdatalen) {
     struct sb_package * p = malloc(sizeof(struct sb_package));
     if (!p) {
         log_error("fail to allocate memory for sb_package, %s", strerror(errno));
@@ -143,17 +144,23 @@ struct sb_package * sb_package_new(unsigned int type, char * ipdata, int ipdatal
 
     return p;
 }
-struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, struct sockaddr_in peer) {
+
+struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, unsigned int mode, struct sockaddr_in peer) {
     struct sb_connection * conn = malloc(sizeof(struct sb_connection));
     if (!conn) {
         log_error("failed to allocate connection object %s", strerror(errno));
         return 0;
     }
-    conn->net_fd = client_fd;
-    conn->net_state = NEW;
+    memset(conn, 0, sizeof(struct sb_connection));
 
-    conn->peer = peer;
-    memset(&conn->peer_vpn_addr, 0, sizeof(conn->peer_vpn_addr));
+    conn->net_fd = client_fd;
+    conn->net_mode = mode;
+    conn->net_state = NEW_0;
+
+    conn->peer_addr = peer;
+    /*peer_vpn_addr is set to 0 by memset above */
+
+    conn->seconds_connected = 0;
 
     conn->app = app;
     conn->eventbase = app->eventbase;
@@ -179,9 +186,9 @@ struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, str
 
     char buf[INET_ADDRSTRLEN];
     snprintf(conn->desc, SB_CONN_DESC_MAX, "%s[%s:%d(%s)]",
-            (conn->app->config->net_mode == TCP ? "TCP" : "UDP"),
-            inet_ntop(AF_INET, &conn->peer.sin_addr, buf, sizeof(buf)),
-            conn->peer.sin_port,
+            (conn->app->config->net_mode == SB_NET_MODE_TCP ? "TCP" : "UDP"),
+            inet_ntop(AF_INET, &conn->peer_addr.sin_addr, buf, sizeof(buf)),
+            conn->peer_addr.sin_port,
             "-");
 
     TAILQ_INSERT_TAIL(&(app->conns), conn, entries);
@@ -196,9 +203,9 @@ void sb_connection_set_vpn_peer(struct sb_connection * conn, struct in_addr peer
     snprintf(conn->desc,
             SB_CONN_DESC_MAX,
             "%s[%s:%d(%s)]",
-            (conn->app->config->net_mode == TCP ? "TCP" : "UDP"),
-            inet_ntop(AF_INET, &conn->peer.sin_addr, buf, sizeof(buf)),
-            ntohs(conn->peer.sin_port),
+            (conn->app->config->net_mode == SB_NET_MODE_TCP ? "TCP" : "UDP"),
+            inet_ntop(AF_INET, &conn->peer_addr.sin_addr, buf, sizeof(buf)),
+            ntohs(conn->peer_addr.sin_port),
             inet_ntop(AF_INET, &conn->peer_vpn_addr, vpnbuf, sizeof(vpnbuf)));
 }
 
@@ -239,54 +246,180 @@ void sb_connection_del(struct sb_connection * conn) {
 
     memset(&conn->peer_vpn_addr, 0, sizeof(conn->peer_vpn_addr));
 
-    conn->net_state = TERMINATED;
+    conn->net_state = TERMINATED_4;
+    log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+    if (conn->net_mode == SB_NET_MODE_TCP) {
+        close(conn->net_fd);
+    }
+    log_info("connection disconnected %s", conn->desc);
     conn->net_fd = -1;
 
     free(conn);
 }
-void sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pkg) {
-    struct sb_app * app = conn->app;
-    char buf[INET_ADDRSTRLEN];
 
+int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pkg) {
+    struct sb_app * app = conn->app;
+    int queued = 0;
+
+    log_enter_func();
     switch(conn->net_state) {
-        case CONNECTED:
-            // this is the init package, contains client ip
-            if (pkg->ipdatalen != sizeof(struct in_addr)) {
-                log_warn("invalid init package length %d", pkg->ipdatalen);
-                close(conn->net_fd);
-                sb_connection_del(conn);
-                return;
+        case NEW_0:
+            /* client */
+            if (conn->app->config->app_mode == CLIENT) {
+                log_warn("received a package with type %d from %s in state %d, ignoring", pkg->type, conn->desc, conn->net_state);
+                break;
             }
-            sb_connection_set_vpn_peer(conn, *((struct in_addr *)pkg->ipdata));
-            inet_ntop(AF_INET, (const void *)&(conn->peer_vpn_addr), buf, sizeof(buf));
-            log_info("vpn peer addr is %s", buf);
-            if ((app->config->mask.s_addr & app->config->addr.s_addr) != (app->config->mask.s_addr & conn->peer_vpn_addr.s_addr)) {
-                log_warn("invalide peer address(not same sub network) in init package: %s", buf);
-                close(conn->net_fd);
-                sb_connection_del(conn);
-                return;
+            /* server */
+            if (pkg->type != SB_PKG_TYPE_INIT_1) {
+                log_warn("received a package with type %d from %s in state %d, expecting %d, disconnecting", pkg->type, conn->desc, conn->net_state, SB_PKG_TYPE_INIT_1);
+                conn->net_state = TERMINATED_4;
+                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                break;
             }
-            conn->net_state = ESTABLISHED;
+            log_trace("received init pkg from %s", conn->desc);
+            /* generate a cookie package and send to client */
+            struct sb_cookie_pkg_data cookie_data;
+            memcpy(&cookie_data.cookie, &conn->cookie, SB_COOKIE_SIZE);
+            cookie_data.vpn_addr = app->config->addr;
+            struct sb_package * cookie_pkg = sb_package_new(SB_PKG_TYPE_COOKIE_4, &cookie_data, sizeof(struct sb_cookie_pkg_data));
+            if (!cookie_pkg) {
+                log_error("failed to create cookie package for %s, disconnecting", conn->desc);
+                conn->net_state = TERMINATED_4;
+                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                break;
+            }
+            TAILQ_INSERT_TAIL(&(conn->packages_t2n), cookie_pkg, entries);
+            queued = 1;
+            conn->t2n_pkg_count++;
+            conn->net_state = CONNECTED_1;
+            log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
             break;
-        case ESTABLISHED:
-            if (conn->n2t_pkg_count >= SB_PKG_BUF_MAX) {
-                // packages_n2t full
-                log_warn("queue full for %s, dropping", conn->desc);
-            } else {
+        case CONNECTED_1:
+            if (pkg->type != SB_PKG_TYPE_COOKIE_4) {
+                log_warn("received a package with type %d from %s in state %d, expecting %d, disconnecting", pkg->type, conn->desc, conn->net_state, SB_PKG_TYPE_COOKIE_4);
+                conn->net_state = TERMINATED_4;
+                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                break;
+            }
+            if (pkg->ipdatalen < sizeof(struct sb_cookie_pkg_data)) {
+                log_warn("invalide cookie package length %d from %s", pkg->ipdatalen, conn->desc);
+                conn->net_state = TERMINATED_4;
+                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                break;
+            }
+            struct sb_cookie_pkg_data * cookie = (struct sb_cookie_pkg_data *)pkg->ipdata;
+            /* client */
+            if (conn->app->config->app_mode == CLIENT) {
+                log_info("received a cookie package, replying cookie to %s", conn->desc);
+
+                /* save to conn */
+                sb_connection_set_vpn_peer(conn, cookie->vpn_addr);
+                memcpy(conn->cookie, cookie->cookie, SB_COOKIE_SIZE);
+
+                /* send back to server, with vpn_addr set to mine */
+                cookie->vpn_addr = app->config->addr;
+                TAILQ_INSERT_TAIL(&(conn->packages_t2n), pkg, entries);
+                queued = 1;
+                conn->t2n_pkg_count++;
+                conn->net_state = ESTABLISHED_2;
+                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+
+                break;
+            }
+            /* server */
+            if (memcmp(cookie->cookie, conn->cookie, SB_COOKIE_SIZE) != 0) {
+                log_warn("invalid cookie from %s, disconnecting", conn->desc);
+                conn->net_state = TERMINATED_4;
+                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                break;
+            }
+            if (sb_vpn_addr_used(conn->app, cookie->vpn_addr)) {
+                log_warn("requested vpn address %s is in use, disconnecting %s", sb_util_human_addr(AF_INET, &cookie->vpn_addr), conn->desc);
+                break;
+                conn->net_state = TERMINATED_4;
+                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+            }
+            /* cookie is valid, now set client vpn_addr */
+            sb_connection_set_vpn_peer(conn, cookie->vpn_addr);
+            log_info("vpn peer addr is %s", sb_util_human_addr(AF_INET, &conn->peer_vpn_addr));
+            conn->net_state = ESTABLISHED_2;
+            log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+            break;
+        case ESTABLISHED_2:
+            if (pkg->type == SB_PKG_TYPE_DATA_2) {
+                if (conn->n2t_pkg_count >= SB_PKG_BUF_MAX) {
+                    // packages_n2t full
+                    log_warn("queue full for %s, dropping", conn->desc);
+                    break;
+                }
                 log_trace("queue a pkg from net %s", conn->desc);
                 TAILQ_INSERT_TAIL(&(conn->packages_n2t), pkg, entries);
+                queued = 1;
                 conn->n2t_pkg_count++;
-                log_trace("n2t_pkg_count is %d after inert", conn->n2t_pkg_count);
+                log_trace("n2t_pkg_count is %d after insert %s", conn->n2t_pkg_count, conn->desc);
+                break;
+            } else if (pkg->type == SB_PKG_TYPE_KEEPALIVE_6) {
+                sb_conn_handle_keepalive(conn, pkg);
+                break;
+            } else if (pkg->type == SB_PKG_TYPE_ROUTE_5) {
+                if (app->config->app_mode == SERVER) {
+                    log_warn("received a route package from client %s, ignoring", conn->desc);
+                    break;
+                }
+                /* client */
+                log_warn("received a route package from server %s, adding route", conn->desc);
+                sb_conn_handle_route(conn, pkg);
+                break;
+            } else if (pkg->type == SB_PKG_TYPE_BYE_3) {
+                if (app->config->app_mode == SERVER) {
+                    log_info("received a bye package from client %s", conn->desc);
+                    if (conn->net_mode == SB_NET_MODE_TCP) {
+                        /* TCP, will wait for client to close connection or timeout */
+                        conn->net_state = CLOSING_3;
+                    } else {
+                        conn->net_state = TERMINATED_4;
+                    }
+                    log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                    break;
+                } else {
+                    /* client */
+                    log_info("received a bye package from server %s", conn->desc);
+                    sb_connection_say_bye(conn);
+                    break;
+                }
+            } else {
+                log_warn("received a package with type %d from %s in state %d, disconnecting", pkg->type, conn->desc, conn->net_state, SB_PKG_TYPE_COOKIE_4);
+                conn->net_state = TERMINATED_4;
+                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                break;
             }
             break;
-        case TERMINATED:
-            log_warn("received a pkg in TERMINATED state");
+        case CLOSING_3:
+            log_warn("received a package with type %d from %s in state %d, disconnecting", pkg->type, conn->desc, conn->net_state, SB_PKG_TYPE_COOKIE_4);
+            conn->net_state = TERMINATED_4;
+            log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+            break;
+        case TERMINATED_4:
+            log_warn("received a pkg in %d state from %s", conn->net_state, conn->desc);
             break;
         default:
-            log_warn("invalide state %d", conn->net_state);
+            log_warn("invalid state %d of %s", conn->net_state, conn->desc);
             break;
     }
-    return;
+    log_exit_func();
+    return queued;
+}
+
+void sb_conn_handle_keepalive(struct sb_connection * conn, struct sb_package * pkg) {
+
+}
+
+void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) {
+
+}
+
+int sb_vpn_addr_used(struct sb_app * app, struct in_addr vpn_addr) {
+    return 0;
 }
 
 int sb_net_io_buf_init(struct sb_net_io_buf * io_buf, struct sb_connection * conn) {
@@ -313,6 +446,25 @@ void sb_net_io_buf_del(struct sb_net_io_buf * io_buf) {
     free(io_buf->buf);
 
     return;
+}
+
+void sb_connection_say_bye(struct sb_connection * conn) {
+    if (conn->net_state == TERMINATED_4) {
+        log_warn("will not say bye in terinated state for %s", conn->desc);
+    } else {
+        log_info("saying bye to %s", conn->desc);
+        /* put a bye package into packages_t2n, so that it can be send to peer */
+        struct sb_package * bye_pkg = sb_package_new(SB_PKG_TYPE_BYE_3, 0, 0);
+        if (!bye_pkg) {
+            log_error("failed to create bye pkg");
+        }
+        TAILQ_INSERT_TAIL(&(conn->packages_t2n), bye_pkg, entries);
+        conn->t2n_pkg_count++;
+        if (conn->app->config->app_mode == CLIENT) {
+            conn->net_state = CLOSING_3;
+        }
+        log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+    }
 }
 
 int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
@@ -351,12 +503,12 @@ int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
         } else {
             // read equals we want
             if (read_buf->state == HDR) {
-                read_buf->pkg_len = ntohs(read_buf->buf->len_buf);
+                read_buf->pkg_len = ntohl(read_buf->buf->len_buf);
                 read_buf->cur_p = read_buf->buf->pkg_buf;
                 read_buf->state = PKG;
             } else if (read_buf->state == PKG) {
                 // full package is read, construct a sb_package, put into conn->packages_n2t
-                struct sb_package * pkg = sb_package_new(ntohl(read_buf->buf->type), read_buf->buf->pkg_buf, read_buf->pkg_len);
+                struct sb_package * pkg = sb_package_new(ntohl(read_buf->buf->type_buf), read_buf->buf->pkg_buf, read_buf->pkg_len);
                 if (!pkg) {
                     log_error("failed to create a sb_package for %s", read_buf->conn->desc);
                     return -1;
@@ -373,7 +525,6 @@ int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
         return 1;
     }
 }
-
 
 int sb_net_io_buf_write(struct sb_net_io_buf * write_buf, int fd) {
     int buflen = SB_NET_BUF_HEADER_SIZE + write_buf->pkg_len - (write_buf->cur_p - (const char *)write_buf->buf);
@@ -412,21 +563,41 @@ void sb_do_tcp_read(evutil_socket_t fd, short what, void * data) {
             break;
         } else if (ret == 1) {
             if (read_buf->cur_pkg) {
-                sb_conn_net_received_pkg(conn, read_buf->cur_pkg);
+                if (!sb_conn_net_received_pkg(conn, read_buf->cur_pkg)) {
+                    free(read_buf->cur_pkg);
+                    read_buf->cur_pkg = 0;
+                }
                 read_buf->cur_pkg = 0;
+                if (conn->net_state == TERMINATED_4) {
+                    sb_connection_del(conn);
+                    conn = 0;
+                    break;
+                }
             }
         } else if (ret == 2) {
             // EOF
             log_info("net peer closed connection, closing net connection for %s",  conn->desc);
-            close(fd);
-            sb_connection_del(conn);
+            conn->net_state = TERMINATED_4;
+            log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+            if (conn->net_state == TERMINATED_4) {
+                sb_connection_del(conn);
+                conn = 0;
+                break;
+            }
             break;
         }
     }
 
-    if (conn->n2t_pkg_count > 0) {
-        log_debug("enabling tun write");
-        event_add(app->tun_writeevent, 0);
+    if (conn) {
+        if (conn->n2t_pkg_count > 0) {
+            log_debug("enabling tun write for %s", conn->desc);
+            event_add(app->tun_writeevent, 0);
+
+        }
+        if (conn->t2n_pkg_count > 0) {
+            log_debug("enabling net write for %s", conn->desc);
+            event_add(conn->net_writeevent, 0);
+        }
     }
     log_exit_func();
     return;
@@ -441,6 +612,7 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
 
     char addrstr[INET_ADDRSTRLEN];
     bool enable_tun_write = false;
+    bool enable_net_write = false;
 
     int ret;
     log_enter_func();
@@ -464,7 +636,7 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
             log_warn("received a package from unsupported address: sa_family %d, addrlen %d", peer_addr.sin_family, addrlen);
             break;
         }
-        unsigned short pkg_len = ntohs(buf.len_buf);
+        unsigned short pkg_len = ntohl(buf.len_buf);
         if (pkg_len != ret - SB_NET_BUF_HEADER_SIZE) {
             log_warn("received udp package length(%d) != declared length(%d) from %s", ret - SB_NET_BUF_HEADER_SIZE, pkg_len, addrstr);
             break;
@@ -472,34 +644,33 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
         // full package is read
         struct sb_connection * conn, * existing_conn = 0;
         TAILQ_FOREACH(conn, &(app->conns), entries) {
-            if (conn->peer.sin_addr.s_addr == peer_addr.sin_addr.s_addr && conn->peer.sin_port == peer_addr.sin_port) {
+            if (sb_util_sockaddr_cmp((struct sockaddr *)&conn->peer_addr, (struct sockaddr *)&peer_addr) == 0) {
                 existing_conn = conn;
                 break;
             }
         }
-        unsigned int type = ntohl(buf.type);
-        if (type == SB_PKG_TYPE_INIT) {
+        unsigned int type = ntohl(buf.type_buf);
+        if (type == SB_PKG_TYPE_INIT_1) {
             if (existing_conn) {
-                log_warn("received INIT pkg from %s, resetting", conn->desc);
+                log_warn("received INIT pkg from %s, resetting", existing_conn->desc);
                 sb_connection_del(existing_conn);
+                existing_conn = 0;
             }
-            conn = sb_connection_new(app, SB_INVALIDE_FD, peer_addr);
+            conn = sb_connection_new(app, fd, SB_NET_MODE_UDP, peer_addr);
             if (!conn) {
                 log_error("failed to init connection for client %s", addrstr);
                 break;
             }
-            conn->net_state = CONNECTED;
+            /* queue a cookie to send to client */
+            if (sb_util_random(conn->cookie, SB_COOKIE_SIZE) < 0) {
+                log_error("failed to generate cookie data for connection %s", conn->desc);
+                break;
+            }
         } else {
-            // find connection by srcaddr, then queue into conn->packages_n2t
             if (existing_conn) {
-                if (conn->n2t_pkg_count >= SB_PKG_BUF_MAX) {
-                    /* should I send a ICMP or something? */
-                    log_warn("queue full for connection %s, dropping", conn->desc);
-                    break;
-                }
                 conn = existing_conn;
             } else {
-                log_warn("no connection for this package, dropping");
+                log_warn("no connection for incoming pkg from %s", sb_util_human_endpoint((struct sockaddr *)&peer_addr));
                 break;
             }
         }
@@ -508,13 +679,29 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
             log_error("failed to create a sb_package for %s, dropping", conn->desc);
             break;
         }
-        sb_conn_net_received_pkg(conn, pkg);
+        if (!sb_conn_net_received_pkg(conn, pkg)) {
+            free(pkg);
+            pkg = 0;
+        }
+        if (conn->net_state == TERMINATED_4) {
+            sb_connection_del(conn);
+            conn = 0;
+            break;
+        }
         if (conn->n2t_pkg_count > 0) {
             enable_tun_write = true;
         }
+        if (conn->t2n_pkg_count > 0) {
+            enable_net_write = true;
+        }
     }
     if (enable_tun_write) {
+        log_debug("enabling tun write");
         event_add(app->tun_writeevent, 0);
+    }
+    if (enable_net_write) {
+        log_debug("enabling net write");
+        event_add(app->udp_writeevent, 0);
     }
     log_exit_func();
     return;
@@ -535,7 +722,8 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
                 disable_net_write = true;
                 break;
             }
-            write_buf->buf->len_buf = htons(write_buf->cur_pkg->ipdatalen);
+            write_buf->buf->type_buf = htonl(write_buf->cur_pkg->type);
+            write_buf->buf->len_buf = htonl(write_buf->cur_pkg->ipdatalen);
             memcpy(write_buf->buf->pkg_buf, write_buf->cur_pkg->ipdata, write_buf->cur_pkg->ipdatalen);
             write_buf->cur_p = (char *)write_buf->buf;
             write_buf->pkg_len = write_buf->cur_pkg->ipdatalen;
@@ -550,13 +738,26 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
             break;
         } else if (ret == 1) {
             if (!write_buf->cur_pkg) {
+                /* a full package is written */
+                if (writing_pkg->type == SB_PKG_TYPE_BYE_3) {
+                conn->net_state = TERMINATED_4;
+                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                if (conn->net_state == TERMINATED_4) {
+                    sb_connection_del(conn);
+                    conn = 0;
+                    break;
+                }
+                } else {
                 TAILQ_REMOVE(&(conn->packages_t2n), writing_pkg, entries);
                 conn->t2n_pkg_count--;
+                free(writing_pkg);
+                writing_pkg = 0;
+                }
             }
         }
     }
 
-    if (disable_net_write) {
+    if (conn && disable_net_write) {
         log_debug("disabling tcp write of %s", conn->desc);
         event_del(conn->net_writeevent);
     }
@@ -567,8 +768,6 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
 void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
     struct sb_app * app = data;
     struct sb_net_buf buf;
-
-    char addrstr[INET_ADDRSTRLEN];
 
     int ret;
     bool disable_net_write = false;
@@ -589,21 +788,23 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
             disable_net_write = true;
             break;
         }
-        buf.type = htonl(pkg->type);
-        buf.len_buf = htons(pkg->ipdatalen);
+        buf.type_buf = htonl(pkg->type);
+        buf.len_buf = htonl(pkg->ipdatalen);
         memcpy(buf.pkg_buf, pkg->ipdata, pkg->ipdatalen);
         int frame_size = SB_NET_BUF_HEADER_SIZE + pkg->ipdatalen;
-        inet_ntop(AF_INET, &conn->peer.sin_addr, addrstr, sizeof(addrstr));
-        ret = sendto(fd, &buf, frame_size, 0, (const struct sockaddr *)&conn->peer, sizeof(conn->peer));
+        log_debug("writing a pkg with legnth %d to %s", frame_size, conn->desc);
+        ret = sendto(fd, &buf, frame_size, 0, (const struct sockaddr *)&conn->peer_addr, sizeof(conn->peer_addr));
         if (ret < 0) {
-            log_error("failed to send package to %s:%d %d %s, dropping", addrstr, ntohs(conn->peer.sin_port), errno, strerror(errno));
+            log_error("failed to send package to %s: %s, dropping", sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr), sb_util_strerror(errno));
         } else {
             if (ret < frame_size) {
-                log_warn("send truncated package to %s:%d", addrstr, conn->peer.sin_port);
+                log_warn("send truncated package to %s", sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr));
             }
         }
         TAILQ_REMOVE(&conn->packages_t2n, pkg, entries);
         conn->t2n_pkg_count--;
+        free(pkg);
+        pkg = 0;
     }
     if (disable_net_write) {
         log_debug("disabling udp write");
@@ -661,11 +862,13 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
         TAILQ_FOREACH(conn, &(app->conns), entries) {
             bool enable_net_write = false;
             log_trace("conn addr: %d, pkg addr: %d", conn->peer_vpn_addr.s_addr, daddr.s_addr);
-            if (app->config->app_mode == CLIENT || conn->peer_vpn_addr.s_addr == daddr.s_addr) {
+            if (conn->net_state != ESTABLISHED_2) {
+                log_debug("received pkg from tun, but connection is not in established state for %s", conn->desc);
+            } else if (app->config->app_mode == CLIENT || conn->peer_vpn_addr.s_addr == daddr.s_addr) {
                 if (conn->t2n_pkg_count >= SB_PKG_BUF_MAX) {
                     /* should I send a ICMP or something? */
                 } else {
-                    struct sb_package * pkg = sb_package_new(SB_PKG_TYPE_DATA, (char *)buf, tun_frame_size);
+                    struct sb_package * pkg = sb_package_new(SB_PKG_TYPE_DATA_2, (char *)buf, tun_frame_size);
                     if (!pkg) {
                         log_error("failed to create a sb_package for %s, dropping", conn->desc);
                         break;
@@ -677,12 +880,12 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
                 }
             }
             enable_udp_write |= enable_net_write;
-            if(enable_net_write && app->config->net_mode == TCP) {
+            if(enable_net_write && app->config->net_mode == SB_NET_MODE_TCP) {
                 log_debug("enabling write for %s", conn->desc);
                 event_add(conn->net_writeevent, 0);
             }
         }
-        if (enable_udp_write && app->config->net_mode == UDP) {
+        if (enable_udp_write && app->config->net_mode == SB_NET_MODE_UDP) {
             log_debug("enabling write for udp");
             event_add(app->udp_writeevent, 0);
         }
@@ -727,6 +930,8 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
             log_trace("sent a pkg with length %d to tun", ret);
             TAILQ_REMOVE(&(conn->packages_n2t), pkg, entries);
             conn->n2t_pkg_count--;
+            free(pkg);
+            pkg = 0;
             log_trace("n2t_pkg_count is %d after remove", conn->n2t_pkg_count);
         }
     }
@@ -753,6 +958,9 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
 
     app->eventbase = eventbase;
 
+    app->sigterm_event = 0;
+    app->sigint_event = 0;
+
     app->tun_readevent = 0;
     app->tun_writeevent = 0;
     app->udp_readevent = 0;
@@ -772,10 +980,37 @@ void sb_app_del(struct sb_app * app) {
         conn = conn2;
     }
 
+    if (app->udp_writeevent) {
+        event_del(app->udp_writeevent);
+        app->udp_writeevent = 0;
+    }
+    if (app->udp_readevent) {
+        event_del(app->udp_readevent);
+        app->udp_readevent = 0;
+    }
+    if (app->tun_writeevent) {
+        event_del(app->tun_writeevent);
+        app->tun_writeevent = 0;
+    }
+    if (app->tun_readevent) {
+        event_del(app->tun_readevent);
+        app->tun_readevent = 0;
+    }
+    if (app->sigterm_event) {
+        event_del(app->sigterm_event);
+        app->sigterm_event = 0;
+    }
+    if (app->sigint_event) {
+        event_del(app->sigint_event);
+        app->sigint_event = 0;
+    }
     app->udp_writeevent = 0;
     app->udp_readevent = 0;
     app->tun_writeevent = 0;
     app->tun_readevent = 0;
+
+    app->sigterm_event = 0;
+    app->sigint_event = 0;
 
     app->eventbase = 0;
 
@@ -784,6 +1019,38 @@ void sb_app_del(struct sb_app * app) {
     free(app->config);
     app->config = 0;
     free(app);
+}
+
+void sb_stop_app(struct sb_app * app, int immiedately) {
+    if (immiedately) {
+        event_base_loopbreak(app->eventbase);
+    } else {
+        struct timeval tv;
+        memset(&tv, 0, sizeof(struct timeval));
+        tv.tv_sec = 5;
+        event_base_loopexit(app->eventbase, &tv);
+
+        struct sb_connection * conn;
+        TAILQ_FOREACH(conn, &(app->conns), entries) {
+            sb_connection_say_bye(conn);
+            if (conn->net_mode == SB_NET_MODE_TCP) {
+                event_add(conn->net_readevent, 0);
+            }
+        }
+        if (app->config->net_mode & SB_NET_MODE_UDP) {
+            event_add(app->udp_writeevent, 0);
+        }
+    }
+}
+
+void sb_sigterm_handler(evutil_socket_t sig, short what, void * data) {
+    log_info("SIGTERM received");
+    sb_stop_app((struct sb_app *)data, 0);
+}
+
+void sb_sigint_handler(evutil_socket_t sig, short what, void * data) {
+    log_info("SIGINT received");
+    sb_stop_app((struct sb_app *)data, 0);
 }
 
 int main(int argc, char ** argv) {
@@ -812,6 +1079,13 @@ int main(int argc, char ** argv) {
         log_fatal("faied to init sb_app");
         return 1;
     }
+
+    /* setup signal handlers */
+    /* call sighup_function on a HUP signal */
+    app->sigterm_event = evsignal_new(eventbase, SIGTERM, sb_sigterm_handler, app);
+    app->sigint_event = evsignal_new(eventbase, SIGINT, sb_sigint_handler, app);
+    event_add(app->sigterm_event, 0);
+    event_add(app->sigint_event, 0);
 
     int tun_fd = setup_tun(&app->config->addr, &app->config->paddr, &app->config->mask, app->config->mtu);
     if (tun_fd < 0) {
@@ -844,7 +1118,7 @@ int main(int argc, char ** argv) {
             log_fatal("failed to setup server socket for ipv4.");
             return 1;
         } else {
-            if (app->config->net_mode == TCP) {
+            if (app->config->net_mode == SB_NET_MODE_TCP) {
                 struct event *accept_ev;
                 accept_ev = event_new(eventbase, server_fd, EV_READ|EV_PERSIST, sb_do_tcp_accept, app);
                 event_add(accept_ev, 0);
@@ -867,7 +1141,7 @@ int main(int argc, char ** argv) {
         struct addrinfo hint, *ai, *ai0;
         memset(&hint, 0, sizeof(hint));
         hint.ai_family = AF_INET;
-        hint.ai_socktype = (app->config->net_mode == TCP ? SOCK_STREAM : SOCK_DGRAM);
+        hint.ai_socktype = (app->config->net_mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM);
         if (getaddrinfo(app->config->remote, 0, &hint, &ai0)) {
             log_error("failed to resolve server address %s", app->config->remote);
             return 1;
@@ -888,22 +1162,23 @@ int main(int argc, char ** argv) {
             return 1;
         }
         log_info("connected to %s:%d", app->config->remote, app->config->port);
-        struct sb_connection * conn = sb_connection_new(app, client_fd, peer_addr);
+        struct sb_connection * conn = sb_connection_new(app, client_fd, app->config->net_mode, peer_addr);
         if (!conn) {
             log_error("failed to init connection for net fd %d", client_fd);
             return 1;
         }
         sb_connection_set_vpn_peer(conn, app->config->paddr);
         /* put a initial package into packages_t2n, so that it can be send to server */
-        struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT, (char *)&app->config->addr, sizeof(app->config->addr));
+        struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, (char *)&app->config->addr, sizeof(app->config->addr));
         if (!init_pkg) {
             log_error("failed to create init pkg");
             return 1;
         }
         TAILQ_INSERT_TAIL(&(conn->packages_t2n), init_pkg, entries);
         conn->t2n_pkg_count++;
-        conn->net_state = ESTABLISHED;
-        if (app->config->net_mode == TCP) {
+        conn->net_state = CONNECTED_1;
+        log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+        if (app->config->net_mode == SB_NET_MODE_TCP) {
             event_add(conn->net_readevent, 0);
             event_add(conn->net_writeevent, 0);
         } else {
@@ -922,6 +1197,7 @@ int main(int argc, char ** argv) {
     /* Start the event loop. */
     event_base_dispatch(eventbase);
 
+    event_base_free(eventbase);
     sb_app_del(app);
     return 0;
 }

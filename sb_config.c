@@ -64,9 +64,15 @@ struct sb_config * sb_config_read(const char * config_file) {
 
     const char * app_net_str = cfg_getstr(cfg, "net");
     if (strcmp(app_net_str, "tcp") == 0) {
-        config->net_mode = TCP;
+        config->net_mode = SB_NET_MODE_TCP;
     } else if (strcmp(app_net_str, "udp") == 0) {
-        config->net_mode = UDP;
+        config->net_mode = SB_NET_MODE_UDP;
+    } else if (strcmp(app_net_str, "both") == 0) {
+        config->net_mode = SB_NET_MODE_TCP | SB_NET_MODE_UDP;
+        if (config->app_mode == CLIENT) {
+            log_error("client net mode can only be either tcp or udp, not both");
+            return 0;
+        }
     } else if (strlen(app_net_str) == 0) {
         log_fatal("net is required");
         return 0;
