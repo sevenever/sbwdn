@@ -16,8 +16,14 @@
 
 #define SB_COOKIE_SIZE 8
 
-/* how long should we wait before next reconnect, max value */
+/* how long should we wait before next reconnect, max value*/
 #define SB_CLIENT_RETRY_INTERVAL_MAX 300
+
+/* how frequently the watchdog should run, in seconds*/
+#define SB_DEFAULT_WATCHDOG_INTERVAL 10
+
+/* how long should we wait before sending next keepalive*/
+#define SB_KEEPALIVE_TIMEOUT 10 * 60
 
 struct iphdr {
     uint8_t    ihl:4,
@@ -153,18 +159,20 @@ int sb_net_io_buf_write(struct sb_net_io_buf * io_buf, int fd);
  * TERMINATED:
  *      only thing can do is delete connection
  */
-enum sb_conn_state { NEW_0 = 0, CONNECTED_1 = 1, ESTABLISHED_2 = 2, CLOSING_3 = 3, TERMINATED_4 = 4 };
+enum sb_conn_state { NEW_0 = 0, CONNECTED_1 = 1, ESTABLISHED_2 = 2, CLOSING_3 = 3, TERMINATED_4 = 4, CONN_STATE_MAX};
 
 struct sb_connection {
     int net_fd;
     unsigned int net_mode;
     enum sb_conn_state net_state;
+    enum sb_conn_state last_net_state;
+    /* how long since this conn stay in current state, in seconds */
+    unsigned int since_net_state_changed;
+    /* how long since this conn sent last keepalive, in seconds */
+    unsigned int since_last_keepalive;
 
     struct sockaddr_in peer_addr;    /* the address of net peer */
     struct in_addr peer_vpn_addr;    /* the address of vpn peer */
-
-    /* seconds since connected (tcp) or init pkg received (udp) */
-    unsigned int seconds_connected;
 
     /* this is only valid for udp */
     char cookie[SB_COOKIE_SIZE];
@@ -189,6 +197,14 @@ struct sb_connection {
 };
 
 void sb_do_tcp_accept(evutil_socket_t listen_fd, short what, void * app);
+
+#define sb_connection_change_net_state(conn, newstate) \
+    do { \
+        conn->last_net_state = conn->net_state; \
+        conn->net_state = newstate; \
+        conn->since_net_state_changed = 0; \
+        log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc); \
+    } while(0); \
 
 /* try to connect to server
  * return 0 if connection is created

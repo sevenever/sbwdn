@@ -42,11 +42,12 @@ struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, uns
     conn->net_fd = client_fd;
     conn->net_mode = mode;
     conn->net_state = NEW_0;
+    conn->last_net_state = NEW_0;
+
+    conn->since_net_state_changed = 0;
 
     conn->peer_addr = peer;
     /*peer_vpn_addr is set to 0 by memset above */
-
-    conn->seconds_connected = 0;
 
     conn->app = app;
     conn->eventbase = app->eventbase;
@@ -119,8 +120,7 @@ void sb_connection_del(struct sb_connection * conn) {
 
     memset(&conn->peer_vpn_addr, 0, sizeof(conn->peer_vpn_addr));
 
-    conn->net_state = TERMINATED_4;
-    log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+    sb_connection_change_net_state(conn, TERMINATED_4);
     if (conn->net_mode == SB_NET_MODE_TCP) {
         close(conn->net_fd);
     }
@@ -158,8 +158,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
             /* server */
             if (pkg->type != SB_PKG_TYPE_INIT_1) {
                 log_warn("received a package with type %d from %s in state %d, expecting %d, disconnecting", pkg->type, conn->desc, conn->net_state, SB_PKG_TYPE_INIT_1);
-                conn->net_state = TERMINATED_4;
-                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
             }
             log_trace("received init pkg from %s", conn->desc);
@@ -170,27 +169,23 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
             struct sb_package * cookie_pkg = sb_package_new(SB_PKG_TYPE_COOKIE_4, &cookie_data, sizeof(struct sb_cookie_pkg_data));
             if (!cookie_pkg) {
                 log_error("failed to create cookie package for %s, disconnecting", conn->desc);
-                conn->net_state = TERMINATED_4;
-                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
             }
             TAILQ_INSERT_TAIL(&(conn->packages_t2n), cookie_pkg, entries);
             queued = 1;
             conn->t2n_pkg_count++;
-            conn->net_state = CONNECTED_1;
-            log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+            sb_connection_change_net_state(conn, CONNECTED_1);
             break;
         case CONNECTED_1:
             if (pkg->type != SB_PKG_TYPE_COOKIE_4) {
                 log_warn("received a package with type %d from %s in state %d, expecting %d, disconnecting", pkg->type, conn->desc, conn->net_state, SB_PKG_TYPE_COOKIE_4);
-                conn->net_state = TERMINATED_4;
-                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
             }
             if (pkg->ipdatalen < sizeof(struct sb_cookie_pkg_data)) {
                 log_warn("invalide cookie package length %d from %s", pkg->ipdatalen, conn->desc);
-                conn->net_state = TERMINATED_4;
-                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
             }
             struct sb_cookie_pkg_data * cookie = (struct sb_cookie_pkg_data *)pkg->ipdata;
@@ -207,29 +202,27 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 TAILQ_INSERT_TAIL(&(conn->packages_t2n), pkg, entries);
                 queued = 1;
                 conn->t2n_pkg_count++;
-                conn->net_state = ESTABLISHED_2;
-                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                sb_connection_change_net_state(conn, ESTABLISHED_2);
+
+                sb_stop_reconnect(app);
 
                 break;
             }
             /* server */
             if (memcmp(cookie->cookie, conn->cookie, SB_COOKIE_SIZE) != 0) {
                 log_warn("invalid cookie from %s, disconnecting", conn->desc);
-                conn->net_state = TERMINATED_4;
-                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
             }
             if (sb_vpn_addr_used(conn->app, cookie->vpn_addr)) {
                 log_warn("requested vpn address %s is in use, disconnecting %s", sb_util_human_addr(AF_INET, &cookie->vpn_addr), conn->desc);
+                sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
-                conn->net_state = TERMINATED_4;
-                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
             }
             /* cookie is valid, now set client vpn_addr */
             sb_connection_set_vpn_peer(conn, cookie->vpn_addr);
             log_info("vpn peer addr is %s", sb_util_human_addr(AF_INET, &conn->peer_vpn_addr));
-            conn->net_state = ESTABLISHED_2;
-            log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+            sb_connection_change_net_state(conn, ESTABLISHED_2);
             break;
         case ESTABLISHED_2:
             if (pkg->type == SB_PKG_TYPE_DATA_2) {
@@ -261,11 +254,10 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                     log_info("received a bye package from client %s", conn->desc);
                     if (conn->net_mode == SB_NET_MODE_TCP) {
                         /* TCP, will wait for client to close connection or timeout */
-                        conn->net_state = CLOSING_3;
+                        sb_connection_change_net_state(conn, CLOSING_3);
                     } else {
-                        conn->net_state = TERMINATED_4;
+                        sb_connection_change_net_state(conn, TERMINATED_4);
                     }
-                    log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
                     break;
                 } else {
                     /* client */
@@ -275,15 +267,13 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 }
             } else {
                 log_warn("received a package with type %d from %s in state %d, disconnecting", pkg->type, conn->desc, conn->net_state, SB_PKG_TYPE_COOKIE_4);
-                conn->net_state = TERMINATED_4;
-                log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+                sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
             }
             break;
         case CLOSING_3:
             log_warn("received a package with type %d from %s in state %d, disconnecting", pkg->type, conn->desc, conn->net_state, SB_PKG_TYPE_COOKIE_4);
-            conn->net_state = TERMINATED_4;
-            log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+            sb_connection_change_net_state(conn, TERMINATED_4);
             break;
         case TERMINATED_4:
             log_warn("received a pkg in %d state from %s", conn->net_state, conn->desc);
@@ -297,14 +287,18 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
 }
 
 void sb_conn_handle_keepalive(struct sb_connection * conn, struct sb_package * pkg) {
-
+    SB_NOT_USED(conn);
+    SB_NOT_USED(pkg);
 }
 
 void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) {
-
+    SB_NOT_USED(conn);
+    SB_NOT_USED(pkg);
 }
 
 int sb_vpn_addr_used(struct sb_app * app, struct in_addr vpn_addr) {
+    SB_NOT_USED(app);
+    SB_NOT_USED(vpn_addr);
     return 0;
 }
 
@@ -321,9 +315,8 @@ void sb_connection_say_bye(struct sb_connection * conn) {
         TAILQ_INSERT_TAIL(&(conn->packages_t2n), bye_pkg, entries);
         conn->t2n_pkg_count++;
         if (conn->app->config->app_mode == CLIENT) {
-            conn->net_state = CLOSING_3;
+            sb_connection_change_net_state(conn, CLOSING_3);
         }
-        log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
     }
 }
 
@@ -342,7 +335,6 @@ void sb_connection_say_hello(struct sb_connection * conn) {
     }
     TAILQ_INSERT_TAIL(&(conn->packages_t2n), init_pkg, entries);
     conn->t2n_pkg_count++;
-    conn->net_state = CONNECTED_1;
-    log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc);
+    sb_connection_change_net_state(conn, CONNECTED_1);
     return;
 }

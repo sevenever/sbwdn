@@ -5,6 +5,10 @@
 #include <event2/event.h>
 
 #include "sb_config.h"
+#include "sb_net.h"
+
+/* how long we wait for sending bye to peer before exit, in seconds*/
+#define SB_STOP_WAITING 1
 
 void sb_do_tun_read(evutil_socket_t fd, short what, void * app);
 
@@ -34,6 +38,13 @@ struct sb_app {
 
     int dont_reconnect;
 
+    struct event * watchdog_event;
+    unsigned int watchdog_interval;
+
+    unsigned int keepalive_interval;
+
+    int timeout_oracle[CONN_STATE_MAX];
+
     TAILQ_HEAD(, sb_connection) conns;
 };
 
@@ -42,6 +53,10 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
 void sb_app_del(struct sb_app * app);
 
 void sb_stop_app(struct sb_app * app, int immiedately);
+
+void setup_watchdog(struct sb_app * app);
+
+void sb_watchdog(evutil_socket_t fd, short what, void * data);
 
 void sb_sigterm_handler(evutil_socket_t sig, short what, void * data);
 

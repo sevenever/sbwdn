@@ -38,6 +38,7 @@ static void libevent_log(int severity, const char *msg) {
 }
 
 void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
+    SB_NOT_USED(what);
     struct sb_app * app = (struct sb_app *) data;
     /* read a package from tun */
     int tun_frame_size;
@@ -61,8 +62,6 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
         struct sb_tun_pi pi = *(struct sb_tun_pi *)buf;
         pi.flags = ntohs(pi.flags);
         pi.proto = ntohs(pi.proto);
-        log_trace("flags in tun_pi:%04x", pi.flags);
-        log_trace("proto in tun_pi:%04x", pi.proto);
         if (pi.proto != PROTO_IPV4) {
             log_debug("unsupported protocol %04x", pi.proto);
             continue;
@@ -85,11 +84,12 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
         TAILQ_FOREACH(conn, &(app->conns), entries) {
             bool enable_net_write = false;
             log_trace("conn addr: %d, pkg addr: %d", conn->peer_vpn_addr.s_addr, daddr.s_addr);
-            if (conn->net_state != ESTABLISHED_2) {
-                log_debug("received pkg from tun, but connection is not in established state for %s", conn->desc);
-            } else if (app->config->app_mode == CLIENT || conn->peer_vpn_addr.s_addr == daddr.s_addr) {
-                if (conn->t2n_pkg_count >= SB_PKG_BUF_MAX) {
+            if (app->config->app_mode == CLIENT || conn->peer_vpn_addr.s_addr == daddr.s_addr) {
+                if (conn->net_state != ESTABLISHED_2) {
+                    log_debug("received pkg from tun, but connection is not in established state for %s", conn->desc);
+                } else if (conn->t2n_pkg_count >= SB_PKG_BUF_MAX) {
                     /* should I send a ICMP or something? */
+                    log_debug("connection queue full %s", conn->desc);
                 } else {
                     struct sb_package * pkg = sb_package_new(SB_PKG_TYPE_DATA_2, (char *)buf, tun_frame_size);
                     if (!pkg) {
@@ -118,6 +118,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
 }
 
 void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
+    SB_NOT_USED(what);
     struct sb_app * app = (struct sb_app *)data;
     bool disable_tun_write = true;
     /* pick a connection that has package pending in packages_n2t */
@@ -195,6 +196,9 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
 
     app->dont_reconnect = 0;
 
+    app->watchdog_event = 0;
+    app->watchdog_interval = SB_DEFAULT_WATCHDOG_INTERVAL;
+
     TAILQ_INIT(&(app->conns));
 
     return app;
@@ -209,6 +213,11 @@ void sb_app_del(struct sb_app * app) {
         conn = conn2;
     }
 
+    if (app->watchdog_event) {
+        event_del(app->watchdog_event);
+        event_free(app->watchdog_event);
+        app->watchdog_event = 0;
+    }
     if (app->reconnect_event) {
         event_del(app->reconnect_event);
         event_free(app->reconnect_event);
@@ -261,7 +270,7 @@ void sb_stop_app(struct sb_app * app, int immiedately) {
     } else {
         struct timeval tv;
         memset(&tv, 0, sizeof(struct timeval));
-        tv.tv_sec = 5;
+        tv.tv_sec = SB_STOP_WAITING;
         event_base_loopexit(app->eventbase, &tv);
 
         struct sb_connection * conn;
@@ -278,12 +287,90 @@ void sb_stop_app(struct sb_app * app, int immiedately) {
     }
 }
 
+void sb_setup_watchdog(struct sb_app * app) {
+    app->timeout_oracle[NEW_0] = 5;
+    app->timeout_oracle[CONNECTED_1] = 10;
+    app->timeout_oracle[ESTABLISHED_2] = -1;
+    app->timeout_oracle[CLOSING_3] = 10;
+    app->timeout_oracle[TERMINATED_4] = 10;
+    if (app->watchdog_event) {
+        log_trace("delete previous watchdog_event");
+        event_del(app->watchdog_event);
+        event_free(app->watchdog_event);
+    }
+    app->watchdog_event = event_new(app->eventbase, -1, EV_PERSIST, sb_watchdog, app);
+    struct timeval tv;
+    memset(&tv, 0, sizeof(tv));
+    tv.tv_sec = app->watchdog_interval;
+    log_info("setting up watch dog to run every %d seconds", app->watchdog_interval);
+    event_add(app->watchdog_event, &tv);
+}
+
+void sb_watchdog(evutil_socket_t fd, short what, void * data) {
+    SB_NOT_USED(fd);
+    SB_NOT_USED(what);
+    struct sb_app * app = data;
+    struct sb_connection * conn;
+
+    log_enter_func();
+    TAILQ_FOREACH(conn, &(app->conns), entries) {
+        log_trace("last_net_state %d, net_state %d", conn->last_net_state, conn->net_state);
+        if (conn->last_net_state == conn->net_state) {
+            log_trace("connection net_state not change in this interval %s", conn->desc);
+            conn->since_net_state_changed += app->watchdog_interval;
+        }
+        conn->last_net_state = conn->net_state;
+
+        unsigned int timeout = app->timeout_oracle[conn->net_state];
+        log_trace("conn in net state %d %d seconds, timeout is %d %s", conn->net_state, conn->since_net_state_changed, timeout, conn->desc);
+        /* a negative timeout value means no timeout */
+        if (timeout > 0 && conn->since_net_state_changed >= timeout) {
+            log_info("connection stay in state %d too long(%d s), will disconnect %s", conn->net_state, timeout, conn->desc);
+            if (app->config->app_mode == CLIENT) {
+                sb_schedule_reconnect(app);
+            }
+            sb_connection_del(conn);
+            /* dont set conn to NULL*/
+            /*conn = 0;*/
+            continue;
+        }
+
+
+        conn->since_last_keepalive += app->watchdog_interval;
+        log_trace("conn since_last_keepalive %d %s", conn->since_last_keepalive, conn->desc);
+        if (conn->since_last_keepalive > SB_KEEPALIVE_TIMEOUT) {
+            log_debug("sending a keepalive pkg to %s", conn->desc);
+            struct sb_package * ka_pkg = sb_package_new(SB_PKG_TYPE_KEEPALIVE_6, 0, 0);
+            if (!ka_pkg) {
+                log_error("failed to create a keepalive package for %s", conn->desc);
+            } else {
+            TAILQ_INSERT_TAIL(&(conn->packages_t2n), ka_pkg, entries);
+            conn->t2n_pkg_count++;
+            if (conn->net_mode == SB_NET_MODE_TCP) {
+                if (conn->net_writeevent) {
+                    event_add(conn->net_writeevent, 0);
+                }
+            } else {
+                if (app->udp_writeevent) {
+                    event_add(app->udp_writeevent, 0);
+                }
+            }
+            }
+        }
+    }
+    log_exit_func();
+}
+
 void sb_sigterm_handler(evutil_socket_t sig, short what, void * data) {
+    SB_NOT_USED(sig);
+    SB_NOT_USED(what);
     log_info("SIGTERM received");
     sb_stop_app((struct sb_app *)data, 0);
 }
 
 void sb_sigint_handler(evutil_socket_t sig, short what, void * data) {
+    SB_NOT_USED(sig);
+    SB_NOT_USED(what);
     log_info("SIGINT received");
     sb_stop_app((struct sb_app *)data, 0);
 }
@@ -314,6 +401,7 @@ int main(int argc, char ** argv) {
         log_fatal("faied to init sb_app");
         return 1;
     }
+    sb_setup_watchdog(app);
 
     /* setup signal handlers */
     /* call sighup_function on a HUP signal */

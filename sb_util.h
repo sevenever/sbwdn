@@ -3,6 +3,8 @@
 
 #include <sys/socket.h>
 
+#define SB_NOT_USED(x) (void)(x)
+
 /* compare two address and port. support ipv4 and ipv6
  * return 0 if families are equal, addresses are equal and ports are equal
  * return -1 otherwise
