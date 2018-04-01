@@ -9,7 +9,9 @@
 
 #define SB_CONFIG_STR_MAX 256
 
-enum SB_APP_MODE { SERVER, CLIENT };
+#define SB_RT_MAX 1024
+
+enum SB_APP_MODE { SB_SERVER, SB_CLIENT };
 
 #define SB_NET_MODE_TCP 0x01
 #define SB_NET_MODE_UDP 0x02
@@ -19,6 +21,11 @@ enum SB_APP_MODE { SERVER, CLIENT };
 #define SB_DEFAULT_NET_MTU 1400
 #define SB_DEFAULT_LOG_LEVEL "info"
 #define SB_DEFAULT_LOG_PATH "/var/log/sbwdn.log"
+
+struct sb_rt {
+    struct in_addr dst;
+    struct in_addr mask;
+};
 
 struct sb_config {
     /* client or server */
@@ -34,6 +41,10 @@ struct sb_config {
     unsigned int mtu;
     enum sb_log_lvl log;
     char logfile[PATH_MAX];
+    char routefile[PATH_MAX];
+
+    unsigned int rt_cnt;
+    struct sb_rt rt[SB_RT_MAX];
 };
 
 struct sb_app;
@@ -44,4 +55,6 @@ struct sb_config * sb_config_read(const char * config_file);
  * return -1 otherwise
  */
 int sb_config_apply(struct sb_app * app, struct sb_config * config);
+
+int sb_parse_rt_file(struct sb_config * config);
 #endif

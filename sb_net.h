@@ -25,6 +25,10 @@
 /* how long should we wait before sending next keepalive*/
 #define SB_KEEPALIVE_TIMEOUT 10 * 60
 
+
+#define SB_RT_OP_ADD 1
+#define SB_RT_OP_DEL 2
+
 struct iphdr {
     uint8_t    ihl:4,
         version:4;
@@ -177,6 +181,7 @@ struct sb_connection {
 
     struct sockaddr_in peer_addr;    /* the address of net peer */
     struct in_addr peer_vpn_addr;    /* the address of vpn peer */
+    struct in_addr vpn_addr;         /* the address of vpn */
 
     /* this is only valid for udp */
     char cookie[SB_COOKIE_SIZE];
@@ -227,4 +232,7 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * conn);
 void sb_do_udp_read(evutil_socket_t fd, short what, void * app);
 
 void sb_do_udp_write(evutil_socket_t fd, short what, void * app);
+
+int sb_modify_route(unsigned int op, struct in_addr * dst, struct in_addr * netmask, struct in_addr * gw);
+
 #endif

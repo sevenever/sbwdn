@@ -81,7 +81,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
         TAILQ_FOREACH(conn, &(app->conns), entries) {
             bool enable_net_write = false;
             log_trace("conn addr: %d, pkg addr: %d", conn->peer_vpn_addr.s_addr, daddr.s_addr);
-            if (app->config->app_mode == CLIENT || conn->peer_vpn_addr.s_addr == daddr.s_addr) {
+            if (app->config->app_mode == SB_CLIENT || conn->peer_vpn_addr.s_addr == daddr.s_addr) {
                 if (conn->net_state != ESTABLISHED_2) {
                     log_debug("received pkg from tun, but connection is not in established state for %s", conn->desc);
                 } else if (conn->t2n_pkg_count >= SB_PKG_BUF_MAX) {
@@ -326,7 +326,7 @@ void sb_watchdog(evutil_socket_t fd, short what, void * data) {
         /* a negative timeout value means no timeout */
         if (timeout > 0 && conn->since_net_state_changed >= timeout) {
             log_info("connection stay in state %d too long(%d s), will disconnect %s", conn->net_state, timeout, conn->desc);
-            if (app->config->app_mode == CLIENT) {
+            if (app->config->app_mode == SB_CLIENT) {
                 sb_schedule_reconnect(app);
             }
             sb_connection_del(conn);
@@ -452,7 +452,7 @@ int main(int argc, char ** argv) {
     app->tun_readevent = tun_readevent;
     app->tun_writeevent = tun_writeevent;
 
-    if (app->config->app_mode == SERVER) {
+    if (app->config->app_mode == SB_SERVER) {
         if (sb_config_tun_addr(app->tunname, &app->config->addr, &app->config->mask, app->config->mtu) < 0) {
             log_fatal("failed to setup tun address");
             return 1;

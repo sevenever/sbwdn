@@ -40,6 +40,7 @@ struct sb_config * sb_config_read(const char * config_file) {
             CFG_INT("mtu", SB_DEFAULT_NET_MTU, CFGF_NONE),
             CFG_STR("log", SB_DEFAULT_LOG_LEVEL, CFGF_NONE),
             CFG_STR("logfile", SB_DEFAULT_LOG_PATH, CFGF_NONE),
+            CFG_STR("routefile", "", CFGF_NONE),
             CFG_END()
 
         };
@@ -58,9 +59,9 @@ struct sb_config * sb_config_read(const char * config_file) {
 
         const char * app_mode_str = cfg_getstr(cfg, "mode");
         if (strcmp(app_mode_str, "server") == 0) {
-            config->app_mode = SERVER;
+            config->app_mode = SB_SERVER;
         } else if (strcmp(app_mode_str, "client") == 0) {
-            config->app_mode = CLIENT;
+            config->app_mode = SB_CLIENT;
         } else if (strlen(app_mode_str) == 0) {
             log_fatal("mode is required");
             failed = 1;
@@ -82,7 +83,7 @@ struct sb_config * sb_config_read(const char * config_file) {
             config->net_mode = SB_NET_MODE_UDP;
         } else if (strcmp(app_net_str, "both") == 0) {
             config->net_mode = SB_NET_MODE_TCP | SB_NET_MODE_UDP;
-            if (config->app_mode == CLIENT) {
+            if (config->app_mode == SB_CLIENT) {
                 log_error("client net mode can only be either tcp or udp, not both");
                 failed = 1;
                 break;
@@ -98,7 +99,7 @@ struct sb_config * sb_config_read(const char * config_file) {
         }
         log_info("network mode is set to %s", app_net_str);
 
-        if (config->app_mode == SERVER) {
+        if (config->app_mode == SB_SERVER) {
             const char * bind_str = cfg_getstr(cfg, "bind");
             if (strlen(bind_str) == 0) {
                 log_fatal("bind is required if in server mode");
@@ -173,10 +174,20 @@ struct sb_config * sb_config_read(const char * config_file) {
         log_info("log level is set to %s", config->log == LOG_INFO ? "info" : log_str);
 
         strncpy(config->logfile, cfg_getstr(cfg, "logfile"), sizeof(config->logfile));
-        log_info("log file is set to %s", config->logfile);
+        log_info("log file is set to [%s]", config->logfile);
+
+        strncpy(config->routefile, cfg_getstr(cfg, "routefile"), sizeof(config->routefile));
+        log_info("route file is set to [%s]", config->routefile);
+
+        /* if any error just ignore */
+        if (config->app_mode == SB_SERVER && strlen(config->routefile) != 0) {
+            sb_parse_rt_file(config);
+        }
     } while(0);
 
-    cfg_free(cfg);
+    if (cfg) {
+        cfg_free(cfg);
+    }
 
     if (failed) {
         if (config) {
@@ -211,3 +222,46 @@ int sb_config_apply(struct sb_app * app, struct sb_config * config) {
     return 0;
 }
 
+int sb_parse_rt_file(struct sb_config * config) {
+    FILE * f = fopen(config->routefile, "r");
+    if (!f) {
+        log_error("failed to open route file %s", config->routefile, sb_util_strerror(errno));
+        return -1;
+    }
+
+    int i = 0;
+    char * line, * space, * dst, * mask;
+    size_t len;
+    ssize_t read;
+    struct sb_rt rt;
+    while ((read = getline(&line, &len, f)) != -1 && i < SB_RT_MAX) {
+        if (read <= 1) {
+            /* empty line */
+            continue;
+        }
+        line[read-1] = 0;
+        space = strstr(line, " ");
+        if (!space) {
+            log_error("invalid route config %s", line);
+            continue;
+        }
+        dst = line;
+        *space = 0;
+        mask = space + 1;
+
+        if (inet_pton(AF_INET, dst, &rt.dst) != 1 || inet_pton(AF_INET, mask, &rt.mask) != 1) {
+            log_error("invalid route config %s", line);
+        } else {
+            config->rt[i++] = rt;
+        }
+    }
+    config->rt_cnt = i;
+    log_info("total route count: %d", config->rt_cnt);
+
+    fclose(f);
+    if (line) {
+        free(line);
+    }
+
+    return 0;
+}

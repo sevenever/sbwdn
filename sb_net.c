@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/ioctl.h>
+#include <net/route.h>
 
 #include "sb_log.h"
 #include "sb_util.h"
@@ -370,7 +371,7 @@ void sb_do_tcp_read(evutil_socket_t fd, short what, void * data) {
                 }
                 read_buf->cur_pkg = 0;
                 if (conn->net_state == TERMINATED_4) {
-                    if (app->config->app_mode == CLIENT) {
+                    if (app->config->app_mode == SB_CLIENT) {
                         sb_schedule_reconnect(app);
                     }
                     sb_connection_del(conn);
@@ -383,7 +384,7 @@ void sb_do_tcp_read(evutil_socket_t fd, short what, void * data) {
             log_info("net peer closed connection, closing net connection for %s",  conn->desc);
             sb_connection_change_net_state(conn, TERMINATED_4);
             if (conn->net_state == TERMINATED_4) {
-                if (app->config->app_mode == CLIENT) {
+                if (app->config->app_mode == SB_CLIENT) {
                     sb_schedule_reconnect(app);
                 }
                 sb_connection_del(conn);
@@ -489,7 +490,7 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
             pkg = 0;
         }
         if (conn->net_state == TERMINATED_4) {
-            if (app->config->app_mode == CLIENT) {
+            if (app->config->app_mode == SB_CLIENT) {
                 sb_schedule_reconnect(app);
             }
             sb_connection_del(conn);
@@ -549,10 +550,10 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
         } else if (ret == 1) {
             if (!write_buf->cur_pkg) {
                 /* a full package is written */
-                if (writing_pkg->type == SB_PKG_TYPE_BYE_3 && app->config->app_mode == CLIENT) {
+                if (writing_pkg->type == SB_PKG_TYPE_BYE_3 && app->config->app_mode == SB_CLIENT) {
                     sb_connection_change_net_state(conn, TERMINATED_4);
                     if (conn->net_state == TERMINATED_4) {
-                        if (app->config->app_mode == CLIENT) {
+                        if (app->config->app_mode == SB_CLIENT) {
                             sb_schedule_reconnect(app);
                         }
                         sb_connection_del(conn);
@@ -619,7 +620,7 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
             sb_connection_change_net_state(conn, TERMINATED_4);
             if (conn->net_state == TERMINATED_4) {
                 log_trace("connection net mode is %d %s", conn->net_mode, conn->desc);
-                if (app->config->app_mode == CLIENT) {
+                if (app->config->app_mode == SB_CLIENT) {
                     sb_schedule_reconnect(app);
                 }
                 sb_connection_del(conn);
@@ -641,3 +642,58 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
     return;
 }
 
+int sb_modify_route(unsigned int op, struct in_addr * dst, struct in_addr * netmask, struct in_addr * gw) {
+#if defined(__linux__)
+    int s, ret, fail = 0;
+    struct rtentry route;
+    struct sockaddr_in *addr;
+
+
+    do {
+        s = socket(AF_INET, SOCK_DGRAM, 0);
+        if (s < 0) {
+            log_error("failed to create socket %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+
+        addr = (struct sockaddr_in*) &route.rt_gateway;
+        addr->sin_family = AF_INET;
+        addr->sin_addr.s_addr = gw->s_addr;
+        addr = (struct sockaddr_in*) &route.rt_dst;
+        addr->sin_family = AF_INET;
+        addr->sin_addr.s_addr = dst->s_addr;
+        addr = (struct sockaddr_in*) &route.rt_genmask;
+        addr->sin_family = AF_INET;
+        addr->sin_addr.s_addr = netmask->s_addr;
+        route.rt_dev = 0;
+        route.rt_flags = RTF_UP | RTF_GATEWAY;
+        route.rt_metric = 0;
+        unsigned long req;
+        switch(op) {
+            case SB_RT_OP_ADD: req = SIOCADDRT; break;
+            case SB_RT_OP_DEL: req = SIOCDELRT; break;
+        }
+        if ((ret = ioctl(s, req, &route)) != 0) {
+            log_error("failed to use ioctl to modify routing %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+    }while(0);
+
+    if(s >= 0) {
+        close(s);
+    }
+    if (fail) {
+        return -1;
+    } else {
+        return 0;
+    }
+#elif defined(__APPLE__)
+    SB_NOT_USED(op);
+    SB_NOT_USED(dst);
+    SB_NOT_USED(netmask);
+    SB_NOT_USED(gw);
+    return 0;
+#endif
+}

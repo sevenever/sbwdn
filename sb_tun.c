@@ -77,54 +77,71 @@ int sb_setup_tun(struct sb_app * app) {
 int sb_config_tun_addr(const char * tunname, const struct in_addr * addr, const struct in_addr * mask, int mtu) {
     char addrstr[INET_ADDRSTRLEN];
     struct ifreq ifr;
-    int ret;
+    int s, ret, fail = 0;
 
-    int s = socket(AF_INET, SOCK_DGRAM, 0);
-    ifr.ifr_addr.sa_family = AF_INET;
-    strncpy(ifr.ifr_name, tunname, sizeof(ifr.ifr_name));
+    do {
+        s = socket(AF_INET, SOCK_DGRAM, 0);
+        if (s < 0) {
+            log_error("failed to create socket %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+        ifr.ifr_addr.sa_family = AF_INET;
+        strncpy(ifr.ifr_name, tunname, sizeof(ifr.ifr_name));
 
-    inet_ntop(AF_INET, addr, addrstr, sizeof(addrstr));
-    log_info("setting address for tun to %s", addrstr);
-    ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *addr;
-    ret = ioctl(s, SIOCSIFADDR, &ifr);
-    if (ret < 0) {
-        log_error("failed to set address for tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
+        inet_ntop(AF_INET, addr, addrstr, sizeof(addrstr));
+        log_info("setting address for tun to %s", addrstr);
+        ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *addr;
+        ret = ioctl(s, SIOCSIFADDR, &ifr);
+        if (ret < 0) {
+            log_error("failed to set address for tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+        log_info("set address for tun to %s", addrstr);
+
+        inet_ntop(AF_INET, mask, addrstr, sizeof(addrstr));
+        log_info("setting mask for tun to %s", addrstr);
+        ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *mask;
+        ret = ioctl(s, SIOCSIFNETMASK, &ifr);
+        if (ret < 0) {
+            log_error("failed to set net mask for tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+        log_info("set mask for tun to %s", addrstr);
+
+        log_info("bring tun up");
+        ret = ioctl(s, SIOCGIFFLAGS, &ifr);
+        if (ret < 0) {
+            log_error("failed to get flags for tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+        ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
+        ret = ioctl(s, SIOCSIFFLAGS, &ifr);
+        if (ret < 0) {
+            log_error("failed bring up tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+        log_info("brought tun up");
+
+        log_info("setting mtu for tun to %d", mtu);
+        ifr.ifr_mtu = mtu;
+        ret = ioctl(s, SIOCSIFMTU, &ifr);
+        if (ret < 0) {
+            log_error("failed set mtu to %d for tun interface %s: %s", mtu, ifr.ifr_name, sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+        log_info("set mtu for tun to %d", mtu);
+    } while(0);
+
+    if (fail) {
+        close(s);
         return -1;
     }
-    log_info("set address for tun to %s", addrstr);
-
-    inet_ntop(AF_INET, mask, addrstr, sizeof(addrstr));
-    log_info("setting mask for tun to %s", addrstr);
-    ((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr = *mask;
-    ret = ioctl(s, SIOCSIFNETMASK, &ifr);
-    if (ret < 0) {
-        log_error("failed to set net mask for tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
-        return -1;
-    }
-    log_info("set mask for tun to %s", addrstr);
-
-    log_info("bring tun up");
-    ret = ioctl(s, SIOCGIFFLAGS, &ifr);
-    if (ret < 0) {
-        log_error("failed to get flags for tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
-        return -1;
-    }
-    ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
-    ret = ioctl(s, SIOCSIFFLAGS, &ifr);
-    if (ret < 0) {
-        log_error("failed bring up tun interface %s: %s", ifr.ifr_name, sb_util_strerror(errno));
-        return -1;
-    }
-    log_info("brought tun up");
-
-    log_info("setting mtu for tun to %d", mtu);
-    ifr.ifr_mtu = mtu;
-    ret = ioctl(s, SIOCSIFMTU, &ifr);
-    if (ret < 0) {
-        log_error("failed set mtu to %d for tun interface %s: %s", mtu, ifr.ifr_name, sb_util_strerror(errno));
-        return -1;
-    }
-    log_info("set mtu for tun to %d", mtu);
 
     return 0;
 }

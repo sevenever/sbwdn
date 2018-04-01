@@ -43,6 +43,8 @@ void sb_conn_handle_keepalive(struct sb_connection * conn, struct sb_package * p
 
 void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg);
 
+void sb_send_route_info(struct sb_connection * conn);
+
 /*
  * find a available vpn addr as client addr
  * if not found, return 0.0.0.0

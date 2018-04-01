@@ -84,6 +84,15 @@ struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, uns
 
 void sb_connection_del(struct sb_connection * conn) {
     struct sb_app * app = conn->app;
+    struct sb_config * config = app->config;
+
+    if (config->app_mode == SB_CLIENT) {
+        for(int i = config->rt_cnt; i >= 0; i--) {
+            struct sb_rt * rt = &config->rt[i];
+            log_debug("remove routing for %s", sb_util_human_addr(AF_INET, &rt->dst));
+            sb_modify_route(SB_RT_OP_DEL, &rt->dst, &rt->mask, &conn->peer_vpn_addr);
+        }
+    }
 
     TAILQ_REMOVE(&(app->conns), conn, entries);
 
@@ -152,7 +161,7 @@ void sb_connection_say_bye(struct sb_connection * conn) {
         }
         TAILQ_INSERT_TAIL(&(conn->packages_t2n), bye_pkg, entries);
         conn->t2n_pkg_count++;
-        if (conn->app->config->app_mode == CLIENT) {
+        if (conn->app->config->app_mode == SB_CLIENT) {
             sb_connection_change_net_state(conn, CLOSING_3);
         }
     }
@@ -188,7 +197,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
     switch(conn->net_state) {
         case NEW_0:
             /* client */
-            if (conn->app->config->app_mode == CLIENT) {
+            if (conn->app->config->app_mode == SB_CLIENT) {
                 log_warn("received a package with type %d from %s in state %d, ignoring", pkg->type, conn->desc, conn->net_state);
                 break;
             }
@@ -237,12 +246,15 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
             }
             struct sb_cookie_pkg_data * cookie = (struct sb_cookie_pkg_data *)pkg->ipdata;
             /* client */
-            if (conn->app->config->app_mode == CLIENT) {
+            if (conn->app->config->app_mode == SB_CLIENT) {
                 log_info("received a cookie package, replying cookie to %s", conn->desc);
 
                 /* save to conn */
                 sb_connection_set_vpn_peer(conn, cookie->client_vpn_addr);
                 memcpy(conn->cookie, cookie->cookie, SB_COOKIE_SIZE);
+
+                /* save server vpn addr, will use when setting route */
+                conn->vpn_addr = cookie->server_vpn_addr;
 
                 log_info("configuring IP of tun device addr to %s", sb_util_human_addr(AF_INET, &cookie->client_vpn_addr));
                 log_info("configuring netmask of tun device addr to %s", sb_util_human_addr(AF_INET, &cookie->netmask));
@@ -279,6 +291,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
             sb_connection_set_vpn_peer(conn, cookie->client_vpn_addr);
             log_info("vpn peer addr is %s", sb_util_human_addr(AF_INET, &conn->peer_vpn_addr));
             sb_connection_change_net_state(conn, ESTABLISHED_2);
+            sb_send_route_info(conn);
             break;
         case ESTABLISHED_2:
             if (pkg->type == SB_PKG_TYPE_DATA_2) {
@@ -297,7 +310,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 sb_conn_handle_keepalive(conn, pkg);
                 break;
             } else if (pkg->type == SB_PKG_TYPE_ROUTE_5) {
-                if (app->config->app_mode == SERVER) {
+                if (app->config->app_mode == SB_SERVER) {
                     log_warn("received a route package from client %s, ignoring", conn->desc);
                     break;
                 }
@@ -306,7 +319,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 sb_conn_handle_route(conn, pkg);
                 break;
             } else if (pkg->type == SB_PKG_TYPE_BYE_3) {
-                if (app->config->app_mode == SERVER) {
+                if (app->config->app_mode == SB_SERVER) {
                     log_info("received a bye package from client %s", conn->desc);
                     if (conn->net_mode == SB_NET_MODE_TCP) {
                         /* TCP, will wait for client to close connection or timeout */
@@ -348,9 +361,35 @@ void sb_conn_handle_keepalive(struct sb_connection * conn, struct sb_package * p
     log_info("received a keepalive pkg from %s", conn->desc);
 }
 
+void sb_send_route_info(struct sb_connection * conn) {
+    struct sb_config * config = conn->app->config;
+    for (unsigned int i = 0; i < config->rt_cnt; i++) {
+        struct sb_package * rt_pkg = sb_package_new(SB_PKG_TYPE_ROUTE_5, &config->rt[i], sizeof(struct sb_rt));
+        if (!rt_pkg) {
+            log_error("failed to create a route package");
+            continue;
+        }
+
+        TAILQ_INSERT_TAIL(&(conn->packages_t2n), rt_pkg, entries);
+        conn->t2n_pkg_count++;
+    }
+}
+
 void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) {
     SB_NOT_USED(conn);
-    SB_NOT_USED(pkg);
+    struct sb_config * config = conn->app->config;
+    if (config->app_mode == SB_SERVER) {
+        log_warn("received a route package from client, ignoring");
+        return;
+    }
+    log_warn("received a route package from server");
+    struct sb_rt * rt = (struct sb_rt *)pkg->ipdata;
+    log_error("dst:[%s]", sb_util_human_addr(AF_INET, &rt->dst))
+    log_error("mask:[%s]", sb_util_human_addr(AF_INET, &rt->mask))
+    log_error("vpn_addr:[%s]", sb_util_human_addr(AF_INET, &conn->vpn_addr))
+    sb_modify_route(SB_RT_OP_ADD, &rt->dst, &rt->mask, &conn->vpn_addr);
+    // save, delete when disconnect
+    config->rt[config->rt_cnt++] = *rt;
 }
 
 struct in_addr sb_find_a_addr_lease(struct sb_app * app) {
