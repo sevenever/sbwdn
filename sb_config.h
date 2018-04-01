@@ -1,6 +1,9 @@
 #ifndef _SB_CONFIG_H_
 #define _SB_CONFIG_H_
 
+#include <sys/types.h>
+#include <limits.h>
+
 #include "sb_log.h"
 #include "sbwdn.h"
 
@@ -10,6 +13,12 @@ enum SB_APP_MODE { SERVER, CLIENT };
 
 #define SB_NET_MODE_TCP 0x01
 #define SB_NET_MODE_UDP 0x02
+
+#define SB_DEFAULT_NET_MODE "udp"
+#define SB_DEFAULT_NET_PORT 812
+#define SB_DEFAULT_NET_MTU 1400
+#define SB_DEFAULT_LOG_LEVEL "info"
+#define SB_DEFAULT_LOG_PATH "/var/log/sbwdn.log"
 
 struct sb_config {
     /* client or server */
@@ -24,9 +33,15 @@ struct sb_config {
     struct in_addr mask;
     unsigned int mtu;
     enum sb_log_lvl log;
+    char logfile[PATH_MAX];
 };
 
 struct sb_app;
 struct sb_config * sb_config_read(const char * config_file);
-void sb_config_apply(struct sb_app * app, struct sb_config * config);
+/*
+ * apply config
+ * return 0 if succeed
+ * return -1 otherwise
+ */
+int sb_config_apply(struct sb_app * app, struct sb_config * config);
 #endif

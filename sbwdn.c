@@ -10,7 +10,6 @@
 #include <stdbool.h>
 #include <netdb.h>
 #include <signal.h>
-#include <net/if.h>
 
 #include "sb_log.h"
 #include "sb_config.h"
@@ -177,7 +176,11 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
         log_fatal("failed to read config file %s", config_file);
         return 0;
     }
-    sb_config_apply(app, config);
+    if (sb_config_apply(app, config) < 0) {
+        free(config);
+        free(app);
+        return 0;
+    }
 
     app->eventbase = eventbase;
 
@@ -381,6 +384,11 @@ int main(int argc, char ** argv) {
 
     /* default log level */
     sb_logger.lvl = LOG_INFO;
+    sb_logger.fp = fopen(SB_DEFAULT_LOG_PATH, "ae");
+    if (!sb_logger.fp) {
+        log_fatal("failed to open default log file %s", SB_DEFAULT_LOG_PATH);
+        return 1;
+    }
 
     /* setup libevent */
     struct event_base * eventbase;
@@ -418,16 +426,23 @@ int main(int argc, char ** argv) {
         log_info("dev in config file is %s", app->config->dev);
         strncpy(app->tunname, app->config->dev, sizeof(app->tunname));
     }
-    int tun_fd = sb_setup_tun(app->tunname, sizeof(app->tunname));
+    int tun_fd = sb_setup_tun(app);
     if (tun_fd < 0) {
         log_fatal("failed to setup tun device");
         return 1;
     }
     if (evutil_make_socket_nonblocking(tun_fd) < 0) {
         log_fatal("failed to set tun_fd to nonblock: %s", sb_util_strerror(errno));
-        return -1;
+        return 1;
     }
     app->tun_fd = tun_fd;
+
+    log_info("mutating to a daemon, a happy daemon");
+    if (daemon(0, 0) < 0) {
+        log_fatal("failed to mutate to a daemon, are you oric?");
+        return 1;
+    }
+    log_info("hello, I am a daemon");
 
     struct event * tun_readevent = event_new(eventbase, tun_fd, EV_READ|EV_PERSIST, sb_do_tun_read, app);
     struct event * tun_writeevent = event_new(eventbase, tun_fd, EV_WRITE|EV_PERSIST, sb_do_tun_write, app);

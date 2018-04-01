@@ -2,6 +2,8 @@
 #define _SBWDN_TUN_H_
 #include <limits.h>
 
+#include "sbwdn.h"
+
 #define SB_TUN_DEV_NAME "sbwdn"
 
 struct sb_tun_dev {
@@ -11,11 +13,11 @@ struct sb_tun_dev {
 };
 
 /* setup tun device.
- * if tunname is "", will allow system assign a device name
+ * if app->tunname is "", will allow system assign a device name
  * otherwise will use this name as device name
- * the device name will be copied into tunname in either case
+ * the device name will be copied into app->tunname in either case
  */
-int sb_setup_tun(char * tunname, unsigned int len);
+int sb_setup_tun(struct sb_app * app);
 
 /* configure address, mask, mtu of device
  * return -1 if error

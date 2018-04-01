@@ -4,17 +4,13 @@
 #include <errno.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <pwd.h>
 
 #include <confuse.h>
 
 #include "sb_log.h"
 #include "sb_util.h"
 #include "sb_config.h"
-
-#define SB_DEFAULT_NET_MODE "udp"
-#define SB_DEFAULT_NET_PORT 812
-#define SB_DEFAULT_NET_MTU  1400
-#define SB_DEFAULT_LOG_LEVEL  "info"
 
 struct sb_config * sb_config_read(const char * config_file) {
     int failed = 0;
@@ -43,10 +39,12 @@ struct sb_config * sb_config_read(const char * config_file) {
             CFG_STR("mask", "", CFGF_NONE),
             CFG_INT("mtu", SB_DEFAULT_NET_MTU, CFGF_NONE),
             CFG_STR("log", SB_DEFAULT_LOG_LEVEL, CFGF_NONE),
+            CFG_STR("logfile", SB_DEFAULT_LOG_PATH, CFGF_NONE),
             CFG_END()
 
         };
 
+        log_info("reading config file: %s", config_file);
         cfg = cfg_init(opts, CFGF_NONE);
         int parse_ret = cfg_parse(cfg, config_file);
         if (parse_ret == CFG_FILE_ERROR) {
@@ -72,7 +70,7 @@ struct sb_config * sb_config_read(const char * config_file) {
             failed = 1;
             break;
         }
-        log_info("app mode %s mode", app_mode_str);
+        log_info("app mode is set to %s mode", app_mode_str);
 
         strncpy(config->dev, cfg_getstr(cfg, "dev"), sizeof(config->dev));
         log_info("device name in config file: [%s]", config->dev);
@@ -98,7 +96,7 @@ struct sb_config * sb_config_read(const char * config_file) {
             failed = 1;
             break;
         }
-        log_info("network mode %s", app_net_str);
+        log_info("network mode is set to %s", app_net_str);
 
         if (config->app_mode == SERVER) {
             const char * bind_str = cfg_getstr(cfg, "bind");
@@ -112,7 +110,7 @@ struct sb_config * sb_config_read(const char * config_file) {
                 failed = 1;
                 break;
             }
-            log_info("bind address is %s", bind_str);
+            log_info("bind address is set to %s", bind_str);
 
             const char * addr_str = cfg_getstr(cfg, "addr");
             if (strlen(addr_str) == 0) {
@@ -124,7 +122,7 @@ struct sb_config * sb_config_read(const char * config_file) {
                 failed = 1;
                 break;
             }
-            log_info("local address is %s", addr_str);
+            log_info("local address is set to %s", addr_str);
 
             const char * mask_str = cfg_getstr(cfg, "mask");
             if (strlen(mask_str) == 0) {
@@ -136,7 +134,7 @@ struct sb_config * sb_config_read(const char * config_file) {
                 failed = 1;
                 break;
             }
-            log_info("network mask is %s", mask_str);
+            log_info("network mask is set to %s", mask_str);
         } else {
             strncpy(config->remote, cfg_getstr(cfg, "remote"), sizeof(config->remote));
             if (strlen(config->remote) == 0) {
@@ -144,13 +142,14 @@ struct sb_config * sb_config_read(const char * config_file) {
                 failed = 1;
                 break;
             }
-            log_info("remote address is %s", config->remote);
+            log_info("remote address is set to %s", config->remote);
         }
 
         config->port = cfg_getint(cfg, "port");
-        log_info("net port is %d", config->port);
+        log_info("net port is set to %d", config->port);
 
         config->mtu = cfg_getint(cfg, "mtu");
+        log_info("net mtu is set to %d", config->mtu);
 
         char * log_str = cfg_getstr(cfg, "log");
         if (strcmp(log_str, "trace") == 0) {
@@ -171,6 +170,10 @@ struct sb_config * sb_config_read(const char * config_file) {
             log_warn("unkown log level %s, will default to info", log_str);
             config->log = LOG_INFO;
         }
+        log_info("log level is set to %s", config->log == LOG_INFO ? "info" : log_str);
+
+        strncpy(config->logfile, cfg_getstr(cfg, "logfile"), sizeof(config->logfile));
+        log_info("log file is set to %s", config->logfile);
     } while(0);
 
     cfg_free(cfg);
@@ -185,12 +188,26 @@ struct sb_config * sb_config_read(const char * config_file) {
         return config;
     }
 }
-void sb_config_apply(struct sb_app * app, struct sb_config * config) {
+
+int sb_config_apply(struct sb_app * app, struct sb_config * config) {
     if (app->config) {
         free(app->config);
     }
     app->config = config;
 
     log_set_lvl(config->log);
+
+    FILE * newfp = fopen(config->logfile, "ae");
+    if (!newfp) {
+        log_fatal("failed to open default log file %s", SB_DEFAULT_LOG_PATH);
+        return -1;
+    }
+    if (sb_logger.fp) {
+        fclose(sb_logger.fp);
+        sb_logger.fp = 0;
+    }
+    sb_logger.fp = newfp;
+
+    return 0;
 }
 

@@ -1,8 +1,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include <net/if.h>
 #if defined(__linux__)
-#include <linux/if.h>
 #include <linux/if_tun.h>
 #elif defined(__APPLE__)
 #include <net/if.h>
@@ -21,8 +21,9 @@
 #include "sb_util.h"
 #include "sb_log.h"
 #include "sb_tun.h"
+#include "sbwdn.h"
 
-int sb_setup_tun(char * tunname, unsigned int len) {
+int sb_setup_tun(struct sb_app * app) {
     int fd;
     struct ifreq ifr;
 
@@ -34,8 +35,8 @@ int sb_setup_tun(char * tunname, unsigned int len) {
     }
     memset(&ifr, 0, sizeof(ifr));
 
-    if (*tunname != 0) {
-        strncpy(ifr.ifr_name, tunname, sizeof(ifr.ifr_name));
+    if (*app->tunname != 0) {
+        strncpy(ifr.ifr_name, app->tunname, sizeof(ifr.ifr_name));
     }
     ifr.ifr_flags = IFF_TUN;
 
@@ -46,6 +47,7 @@ int sb_setup_tun(char * tunname, unsigned int len) {
         return -1;
     }
     log_info("created tun device %s", ifr.ifr_name);
+
 #elif defined (__APPLE__)
     #define TUN_MAX 16
     char tun_dev[PATH_MAX];
@@ -67,7 +69,7 @@ int sb_setup_tun(char * tunname, unsigned int len) {
     snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "tun%d", tun_id);
     log_info("openned tun device tun%d", tun_id);
 #endif
-    strncpy(tunname, ifr.ifr_name, len);
+    strncpy(app->tunname, ifr.ifr_name, sizeof(app->tunname));
 
     return fd;
 }
