@@ -172,12 +172,12 @@ enum sb_conn_state { NEW_0 = 0, CONNECTED_1 = 1, ESTABLISHED_2 = 2, CLOSING_3 = 
 struct sb_connection {
     int net_fd;
     unsigned int net_mode;
+
+    struct event * timeout_timer;
+
+    struct event * keepalive_timer;
+
     enum sb_conn_state net_state;
-    enum sb_conn_state last_net_state;
-    /* how long since this conn stay in current state, in seconds */
-    unsigned int since_net_state_changed;
-    /* how long since this conn sent last keepalive, in seconds */
-    unsigned int since_last_keepalive;
 
     struct sockaddr_in peer_addr;    /* the address of net peer */
     struct in_addr peer_vpn_addr;    /* the address of vpn peer */
@@ -206,14 +206,6 @@ struct sb_connection {
 };
 
 void sb_do_tcp_accept(evutil_socket_t listen_fd, short what, void * app);
-
-#define sb_connection_change_net_state(conn, newstate) \
-    do { \
-        conn->last_net_state = conn->net_state; \
-        conn->net_state = newstate; \
-        conn->since_net_state_changed = 0; \
-        log_trace("connection net_state change to %d: %s", conn->net_state, conn->desc); \
-    } while(0); \
 
 /* try to connect to server
  * return 0 if connection is created

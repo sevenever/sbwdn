@@ -3,6 +3,8 @@
 
 #include <sys/socket.h>
 
+#include <event2/event.h>
+
 #define SB_NOT_USED(x) (void)(x)
 
 /* compare two address and port. support ipv4 and ipv6
@@ -34,5 +36,9 @@ const char * sb_util_strerror(int eno);
  * return 0 if succeed
  */
 int sb_util_random(char * data, unsigned int len);
+
+void sb_util_set_timeout(struct event * ev, unsigned int timeout);
+
+void sb_util_clear_timeout(struct event * ev);
 
 #endif

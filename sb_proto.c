@@ -40,18 +40,20 @@ struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, uns
     }
     memset(conn, 0, sizeof(struct sb_connection));
 
+    conn->app = app;
+    conn->eventbase = app->eventbase;
+
     conn->net_fd = client_fd;
     conn->net_mode = mode;
-    conn->net_state = NEW_0;
-    conn->last_net_state = NEW_0;
 
-    conn->since_net_state_changed = 0;
+    conn->timeout_timer = event_new(conn->eventbase, -1, EV_PERSIST, sb_do_conn_timeout, conn);
+
+    conn->keepalive_timer = event_new(conn->eventbase, -1, EV_PERSIST, sb_do_conn_send_keepalive, conn);
+
+    conn->net_state = NEW_0;
 
     conn->peer_addr = peer;
     /*peer_vpn_addr is set to 0 by memset above */
-
-    conn->app = app;
-    conn->eventbase = app->eventbase;
 
     struct event * net_readevent = event_new(conn->eventbase, conn->net_fd, EV_READ | EV_PERSIST, sb_do_tcp_read, conn);
     conn->net_readevent = net_readevent;
@@ -87,8 +89,8 @@ void sb_connection_del(struct sb_connection * conn) {
     struct sb_config * config = app->config;
 
     if (config->app_mode == SB_CLIENT) {
-        for(int i = config->rt_cnt; i >= 0; i--) {
-            struct sb_rt * rt = &config->rt[i];
+        for(int i = config->rt_cnt; i > 0; i--) {
+            struct sb_rt * rt = &config->rt[i - 1];
             log_debug("remove routing for %s", sb_util_human_addr(AF_INET, &rt->dst));
             sb_modify_route(SB_RT_OP_DEL, &rt->dst, &rt->mask, &conn->peer_vpn_addr);
         }
@@ -120,22 +122,37 @@ void sb_connection_del(struct sb_connection * conn) {
     }
     conn->n2t_pkg_count = 0;
 
+    event_del(conn->net_writeevent);
     event_free(conn->net_writeevent);
+    conn->net_writeevent = 0;
+    event_del(conn->net_readevent);
     event_free(conn->net_readevent);
-
-    conn->eventbase = 0;
-    conn->app = 0;
+    conn->net_readevent = 0;
 
     memset(&conn->peer_vpn_addr, 0, sizeof(conn->peer_vpn_addr));
 
-    sb_connection_change_net_state(conn, TERMINATED_4);
+    event_del(conn->timeout_timer);
+    event_free(conn->timeout_timer);
+    conn->timeout_timer = 0;
+
+    event_del(conn->keepalive_timer);
+    event_free(conn->keepalive_timer);
+    conn->keepalive_timer = 0;
+
+    conn->net_state = TERMINATED_4;
+
     if (conn->net_mode == SB_NET_MODE_TCP) {
         close(conn->net_fd);
     }
+    
+    conn->eventbase = 0;
+    conn->app = 0;
+
     log_info("connection disconnected %s", conn->desc);
     conn->net_fd = -1;
 
     free(conn);
+    conn = 0;
 }
 
 void sb_connection_set_vpn_peer(struct sb_connection * conn, struct in_addr peer_vpn_addr) {
@@ -355,14 +372,73 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
     return queued;
 }
 
+void sb_do_conn_timeout(evutil_socket_t fd, short what, void * data) {
+    SB_NOT_USED(fd);
+    SB_NOT_USED(what);
+    struct sb_connection * conn = (struct sb_connection *)data;
+
+    log_error("connection timeout in state %d %s", conn->net_state, conn->desc);
+    sb_connection_change_net_state(conn, TERMINATED_4);
+}
+
+void sb_do_conn_send_keepalive(evutil_socket_t fd, short what, void * data) {
+    SB_NOT_USED(fd);
+    SB_NOT_USED(what);
+    struct sb_connection * conn = (struct sb_connection *)data;
+    struct sb_app * app = (struct sb_app *)conn->app;
+
+    struct sb_package * ka_pkg = (struct sb_package *)sb_package_new(SB_PKG_TYPE_KEEPALIVE_6, 0, 0);
+    if (!ka_pkg) {
+        log_error("failed to create a keepalive package");
+        return;
+    }
+
+    log_info("queuing a keepalive pkg to %s", conn->desc);
+    TAILQ_INSERT_TAIL(&(conn->packages_t2n), ka_pkg, entries);
+    conn->t2n_pkg_count++;
+    if (conn->net_mode == SB_NET_MODE_TCP && conn->net_writeevent) {
+        event_add(conn->net_writeevent, 0);
+    } else if (conn->net_mode == SB_NET_MODE_UDP && app->udp_writeevent) {
+        event_add(app->udp_writeevent, 0);
+    }
+}
+
 void sb_conn_handle_keepalive(struct sb_connection * conn, struct sb_package * pkg) {
     SB_NOT_USED(conn);
     SB_NOT_USED(pkg);
     log_info("received a keepalive pkg from %s", conn->desc);
+
+    if (conn->net_state != ESTABLISHED_2) {
+        log_error("received a keepalive pkg but not in established state, instead in %d, %s", conn->net_state, conn->desc);
+    }
+    /* this is the trick(danger), if we set net state, the timeout_timer will be reset*/
+    sb_connection_change_net_state(conn, ESTABLISHED_2);
+}
+
+void sb_conn_set_timeout(struct sb_connection * conn, int newstate) {
+    /* keepalive */
+    if (newstate == ESTABLISHED_2) {
+        if (conn->keepalive_timer) {
+            sb_util_set_timeout(conn->keepalive_timer, SB_KEEPALIVE_INTERVAL);
+        }
+    }
+    if (conn->net_state == ESTABLISHED_2) {
+        if (conn->keepalive_timer) {
+            sb_util_clear_timeout(conn->keepalive_timer);
+        }
+    }
+
+    /* connection abnormal */
+    if (conn->timeout_timer) {
+        unsigned int timeout = conn->app->conn_timeout_oracle[newstate];
+        log_debug("setting a timeout %d seconds in state of %d on %s", timeout, conn->net_state, conn->desc);
+        sb_util_set_timeout(conn->timeout_timer, timeout);
+    }
 }
 
 void sb_send_route_info(struct sb_connection * conn) {
     struct sb_config * config = conn->app->config;
+    log_info("sending %d routing info to client %s", config->rt_cnt, conn->desc);
     for (unsigned int i = 0; i < config->rt_cnt; i++) {
         struct sb_package * rt_pkg = sb_package_new(SB_PKG_TYPE_ROUTE_5, &config->rt[i], sizeof(struct sb_rt));
         if (!rt_pkg) {
@@ -384,9 +460,6 @@ void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) 
     }
     log_warn("received a route package from server");
     struct sb_rt * rt = (struct sb_rt *)pkg->ipdata;
-    log_error("dst:[%s]", sb_util_human_addr(AF_INET, &rt->dst))
-    log_error("mask:[%s]", sb_util_human_addr(AF_INET, &rt->mask))
-    log_error("vpn_addr:[%s]", sb_util_human_addr(AF_INET, &conn->vpn_addr))
     sb_modify_route(SB_RT_OP_ADD, &rt->dst, &rt->mask, &conn->vpn_addr);
     // save, delete when disconnect
     config->rt[config->rt_cnt++] = *rt;

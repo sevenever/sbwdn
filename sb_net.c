@@ -135,7 +135,10 @@ void sb_net_io_buf_del(struct sb_net_io_buf * io_buf) {
     io_buf->cur_p = (char *)io_buf->buf;
     io_buf->cur_pkg = 0;
     io_buf->state = HDR;
-    free(io_buf->buf);
+    if (io_buf->buf) {
+        free(io_buf->buf);
+        io_buf->buf = 0;
+    }
 
     return;
 }
@@ -253,10 +256,13 @@ void sb_do_tcp_accept(evutil_socket_t listen_fd, short what, void * data) {
 void sb_try_client_connect(evutil_socket_t notused, short what, void * data) {
     SB_NOT_USED(notused);
     SB_NOT_USED(what);
+
     struct sb_app * app = data;
-    int client_fd = -1;
+    struct sb_connection * conn = 0;
 
     do {
+        int client_fd = -1;
+
         log_info("connecting to %s:%d", app->config->remote, app->config->port);
         struct addrinfo hint, *ai, *ai0;
         memset(&hint, 0, sizeof(hint));
@@ -281,7 +287,7 @@ void sb_try_client_connect(evutil_socket_t notused, short what, void * data) {
             break;
         }
         log_info("connected to %s:%d", app->config->remote, app->config->port);
-        struct sb_connection * conn = sb_connection_new(app, client_fd, app->config->net_mode, peer_addr);
+        conn = sb_connection_new(app, client_fd, app->config->net_mode, peer_addr);
         if (!conn) {
             log_error("failed to init connection for net fd %d", client_fd);
             break;
@@ -312,7 +318,7 @@ void sb_try_client_connect(evutil_socket_t notused, short what, void * data) {
         }
     } while(0);
 
-    if (client_fd < 0) {
+    if (!conn) {
         sb_schedule_reconnect(app);
     }
 }
@@ -366,16 +372,12 @@ void sb_do_tcp_read(evutil_socket_t fd, short what, void * data) {
             if (read_buf->cur_pkg) {
                 if (!sb_conn_net_received_pkg(conn, read_buf->cur_pkg)) {
                     free(read_buf->cur_pkg->ipdata);
+                    read_buf->cur_pkg->ipdata = 0;
                     free(read_buf->cur_pkg);
                     read_buf->cur_pkg = 0;
                 }
                 read_buf->cur_pkg = 0;
                 if (conn->net_state == TERMINATED_4) {
-                    if (app->config->app_mode == SB_CLIENT) {
-                        sb_schedule_reconnect(app);
-                    }
-                    sb_connection_del(conn);
-                    conn = 0;
                     break;
                 }
             }
@@ -384,18 +386,13 @@ void sb_do_tcp_read(evutil_socket_t fd, short what, void * data) {
             log_info("net peer closed connection, closing net connection for %s",  conn->desc);
             sb_connection_change_net_state(conn, TERMINATED_4);
             if (conn->net_state == TERMINATED_4) {
-                if (app->config->app_mode == SB_CLIENT) {
-                    sb_schedule_reconnect(app);
-                }
-                sb_connection_del(conn);
-                conn = 0;
                 break;
             }
             break;
         }
     }
 
-    if (conn) {
+    if (conn && conn->net_state != TERMINATED_4) {
         if (conn->n2t_pkg_count > 0) {
             log_debug("enabling tun write for %s", conn->desc);
             event_add(app->tun_writeevent, 0);
@@ -486,21 +483,14 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
         }
         if (!sb_conn_net_received_pkg(conn, pkg)) {
             free(pkg->ipdata);
+            pkg->ipdata = 0;
             free(pkg);
             pkg = 0;
         }
-        if (conn->net_state == TERMINATED_4) {
-            if (app->config->app_mode == SB_CLIENT) {
-                sb_schedule_reconnect(app);
-            }
-            sb_connection_del(conn);
-            conn = 0;
-            continue;
-        }
-        if (conn->n2t_pkg_count > 0) {
+        if (conn && conn->net_state != TERMINATED_4 && conn->n2t_pkg_count > 0) {
             enable_tun_write = true;
         }
-        if (conn->t2n_pkg_count > 0) {
+        if (conn && conn->net_state != TERMINATED_4 && conn->t2n_pkg_count > 0) {
             enable_net_write = true;
         }
     }
@@ -553,17 +543,13 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
                 if (writing_pkg->type == SB_PKG_TYPE_BYE_3 && app->config->app_mode == SB_CLIENT) {
                     sb_connection_change_net_state(conn, TERMINATED_4);
                     if (conn->net_state == TERMINATED_4) {
-                        if (app->config->app_mode == SB_CLIENT) {
-                            sb_schedule_reconnect(app);
-                        }
-                        sb_connection_del(conn);
-                        conn = 0;
-                        continue;
+                        break;
                     }
                 } else {
                     TAILQ_REMOVE(&(conn->packages_t2n), writing_pkg, entries);
                     conn->t2n_pkg_count--;
                     free(writing_pkg->ipdata);
+                    writing_pkg->ipdata = 0;
                     free(writing_pkg);
                     writing_pkg = 0;
                 }
@@ -619,17 +605,13 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
         if (pkg->type == SB_PKG_TYPE_BYE_3) {
             sb_connection_change_net_state(conn, TERMINATED_4);
             if (conn->net_state == TERMINATED_4) {
-                log_trace("connection net mode is %d %s", conn->net_mode, conn->desc);
-                if (app->config->app_mode == SB_CLIENT) {
-                    sb_schedule_reconnect(app);
-                }
-                sb_connection_del(conn);
-                conn = 0;
+                continue;
             }
         } else {
             TAILQ_REMOVE(&conn->packages_t2n, pkg, entries);
             conn->t2n_pkg_count--;
             free(pkg->ipdata);
+            pkg->ipdata = 0;
             free(pkg);
             pkg = 0;
         }

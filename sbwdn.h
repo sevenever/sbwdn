@@ -46,7 +46,7 @@ struct sb_app {
 
     unsigned int keepalive_interval;
 
-    int timeout_oracle[CONN_STATE_MAX];
+    int conn_timeout_oracle[CONN_STATE_MAX];
 
     TAILQ_HEAD(, sb_connection) conns;
 };

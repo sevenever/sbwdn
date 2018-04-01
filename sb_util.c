@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <errno.h>
 
+#include <event2/event.h>
+
 #include "sb_log.h"
 #include "sb_util.h"
 
@@ -87,4 +89,19 @@ int sb_util_random(char * data, unsigned int len) {
     }
 
     return 0;
+}
+
+void sb_util_set_timeout(struct event * ev, unsigned int timeout) {
+    if (!ev) {
+        log_error("ev is null");
+        return;
+    }
+    struct timeval tv;
+    memset(&tv, 0, sizeof(tv));
+    tv.tv_sec = timeout;
+    event_add(ev, &tv);
+}
+
+void sb_util_clear_timeout(struct event * ev) {
+    event_del(ev);
 }

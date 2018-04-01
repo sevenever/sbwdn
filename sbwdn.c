@@ -152,6 +152,7 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
             TAILQ_REMOVE(&(conn->packages_n2t), pkg, entries);
             conn->n2t_pkg_count--;
             free(pkg->ipdata);
+            pkg->ipdata = 0;
             free(pkg);
             pkg = 0;
             log_trace("n2t_pkg_count is %d after remove", conn->n2t_pkg_count);
@@ -178,7 +179,9 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
     }
     if (sb_config_apply(app, config) < 0) {
         free(config);
+        config = 0;
         free(app);
+        app = 0;
         return 0;
     }
 
@@ -202,6 +205,16 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
     app->watchdog_interval = SB_DEFAULT_WATCHDOG_INTERVAL;
 
     TAILQ_INIT(&(app->conns));
+
+    app->conn_timeout_oracle[NEW_0] = 10;
+    app->conn_timeout_oracle[CONNECTED_1] = 10;
+    /* this timeout is actually keepalive timeout, if the time since last keepalive from peer
+     * is greater than this, we will disconnect.
+     * set to SB_KEEPALIVE_INTERVAL * 5 means if we miss 5 keepalives from peer, we will disconnect
+     */
+    app->conn_timeout_oracle[ESTABLISHED_2] = SB_KEEPALIVE_INTERVAL * 5;
+    app->conn_timeout_oracle[CLOSING_3] = 10;
+    app->conn_timeout_oracle[TERMINATED_4] = 10;
 
     return app;
 }
@@ -261,6 +274,7 @@ void sb_app_del(struct sb_app * app) {
     free(app->config);
     app->config = 0;
     free(app);
+    app = 0;
 }
 
 void sb_stop_app(struct sb_app * app, int immiedately) {
@@ -285,81 +299,6 @@ void sb_stop_app(struct sb_app * app, int immiedately) {
             event_add(app->udp_writeevent, 0);
         }
     }
-}
-
-void sb_setup_watchdog(struct sb_app * app) {
-    app->timeout_oracle[NEW_0] = 5;
-    app->timeout_oracle[CONNECTED_1] = 10;
-    app->timeout_oracle[ESTABLISHED_2] = -1;
-    app->timeout_oracle[CLOSING_3] = 10;
-    app->timeout_oracle[TERMINATED_4] = 10;
-    if (app->watchdog_event) {
-        log_trace("delete previous watchdog_event");
-        event_del(app->watchdog_event);
-        event_free(app->watchdog_event);
-    }
-    app->watchdog_event = event_new(app->eventbase, -1, EV_PERSIST, sb_watchdog, app);
-    struct timeval tv;
-    memset(&tv, 0, sizeof(tv));
-    tv.tv_sec = app->watchdog_interval;
-    log_info("setting up watch dog to run every %d seconds", app->watchdog_interval);
-    event_add(app->watchdog_event, &tv);
-}
-
-void sb_watchdog(evutil_socket_t fd, short what, void * data) {
-    SB_NOT_USED(fd);
-    SB_NOT_USED(what);
-    struct sb_app * app = data;
-    struct sb_connection * conn;
-
-    log_enter_func();
-    TAILQ_FOREACH(conn, &(app->conns), entries) {
-        log_trace("last_net_state %d, net_state %d", conn->last_net_state, conn->net_state);
-        if (conn->last_net_state == conn->net_state) {
-            log_trace("connection net_state not change in this interval %s", conn->desc);
-            conn->since_net_state_changed += app->watchdog_interval;
-        }
-        conn->last_net_state = conn->net_state;
-
-        unsigned int timeout = app->timeout_oracle[conn->net_state];
-        log_trace("conn in net state %d %d seconds, timeout is %d %s", conn->net_state, conn->since_net_state_changed, timeout, conn->desc);
-        /* a negative timeout value means no timeout */
-        if (timeout > 0 && conn->since_net_state_changed >= timeout) {
-            log_info("connection stay in state %d too long(%d s), will disconnect %s", conn->net_state, timeout, conn->desc);
-            if (app->config->app_mode == SB_CLIENT) {
-                sb_schedule_reconnect(app);
-            }
-            sb_connection_del(conn);
-            /* dont set conn to NULL*/
-            /*conn = 0;*/
-            continue;
-        }
-
-
-        conn->since_last_keepalive += app->watchdog_interval;
-        log_trace("conn since_last_keepalive %d %s", conn->since_last_keepalive, conn->desc);
-        if (conn->since_last_keepalive >= SB_KEEPALIVE_TIMEOUT) {
-            log_debug("sending a keepalive pkg to %s", conn->desc);
-            struct sb_package * ka_pkg = sb_package_new(SB_PKG_TYPE_KEEPALIVE_6, 0, 0);
-            if (!ka_pkg) {
-                log_error("failed to create a keepalive package for %s", conn->desc);
-            } else {
-                TAILQ_INSERT_TAIL(&(conn->packages_t2n), ka_pkg, entries);
-                conn->t2n_pkg_count++;
-                if (conn->net_mode == SB_NET_MODE_TCP) {
-                    if (conn->net_writeevent) {
-                        event_add(conn->net_writeevent, 0);
-                    }
-                } else {
-                    if (app->udp_writeevent) {
-                        event_add(app->udp_writeevent, 0);
-                    }
-                }
-                conn->since_last_keepalive = 0;
-            }
-        }
-    }
-    log_exit_func();
 }
 
 void sb_sigterm_handler(evutil_socket_t sig, short what, void * data) {
@@ -389,6 +328,10 @@ int main(int argc, char ** argv) {
         log_fatal("failed to open default log file %s", SB_DEFAULT_LOG_PATH);
         return 1;
     }
+    if (setvbuf(sb_logger.fp, 0, _IONBF, 0) != 0) {
+        log_error("failed to set default log file as unbuffered %s", SB_DEFAULT_LOG_PATH);
+        return -1;
+    }
 
     /* setup libevent */
     struct event_base * eventbase;
@@ -407,7 +350,6 @@ int main(int argc, char ** argv) {
         log_fatal("faied to init sb_app");
         return 1;
     }
-    sb_setup_watchdog(app);
 
     /* setup signal handlers */
     /* call sighup_function on a HUP signal */

@@ -203,6 +203,7 @@ struct sb_config * sb_config_read(const char * config_file) {
 int sb_config_apply(struct sb_app * app, struct sb_config * config) {
     if (app->config) {
         free(app->config);
+        app->config = 0;
     }
     app->config = config;
 
@@ -210,10 +211,14 @@ int sb_config_apply(struct sb_app * app, struct sb_config * config) {
 
     FILE * newfp = fopen(config->logfile, "ae");
     if (!newfp) {
-        log_fatal("failed to open default log file %s", SB_DEFAULT_LOG_PATH);
+        log_fatal("failed to open log file %s", config->logfile);
         return -1;
     }
-    if (sb_logger.fp) {
+    if (setvbuf(newfp, 0, _IONBF, 0) != 0) {
+        log_error("failed to set log file as unbuffered %s", config->logfile);
+        return -1;
+    }
+    if (sb_logger.fp && fileno(sb_logger.fp) != fileno(newfp)) {
         fclose(sb_logger.fp);
         sb_logger.fp = 0;
     }
@@ -261,6 +266,7 @@ int sb_parse_rt_file(struct sb_config * config) {
     fclose(f);
     if (line) {
         free(line);
+        line = 0;
     }
 
     return 0;

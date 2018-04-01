@@ -7,12 +7,16 @@
 
 #define SB_PROTO_MULTI_SYNC_NUM 3
 
+/* seconds between send keepalive */
+#define SB_KEEPALIVE_INTERVAL (60 * 10)
+
 #define SB_PKG_TYPE_INIT_1 1
 #define SB_PKG_TYPE_DATA_2 2
 #define SB_PKG_TYPE_BYE_3 3
 #define SB_PKG_TYPE_COOKIE_4 4
 #define SB_PKG_TYPE_ROUTE_5 5
 #define SB_PKG_TYPE_KEEPALIVE_6 6
+
 /* this represent an IP package */
 struct sb_package {
     uint32_t type;
@@ -39,7 +43,26 @@ void sb_connection_say_hello(struct sb_connection * conn);
  */
 int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pkg);
 
+void sb_do_conn_timeout(evutil_socket_t fd, short what, void * data);
+
+void sb_do_conn_send_keepalive(evutil_socket_t fd, short what, void * data);
+
 void sb_conn_handle_keepalive(struct sb_connection * conn, struct sb_package * pkg);
+
+void sb_conn_set_timeout(struct sb_connection * conn, int newstate);
+
+#define sb_connection_change_net_state(conn, newstate) \
+    do { \
+        log_trace("connection net_state changing from %d to %d: %s", conn->net_state, newstate, conn->desc); \
+        sb_conn_set_timeout(conn, newstate); \
+        conn->net_state = newstate; \
+        if (conn->net_state == TERMINATED_4) { \
+            if (conn->app->config->app_mode == SB_CLIENT) { \
+                sb_schedule_reconnect(conn->app); \
+            } \
+            sb_connection_del(conn); \
+        } \
+    } while(0);
 
 void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg);
 
