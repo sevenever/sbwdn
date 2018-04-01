@@ -5,6 +5,8 @@
 
 #include "sb_net.h"
 
+#define SB_PROTO_MULTI_SYNC_NUM 3
+
 #define SB_PKG_TYPE_INIT_1 1
 #define SB_PKG_TYPE_DATA_2 2
 #define SB_PKG_TYPE_BYE_3 3

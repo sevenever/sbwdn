@@ -435,16 +435,16 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
         }
         if (ret == 0) {
             log_warn("received a 0 length udp package from %s", sb_util_human_endpoint((struct sockaddr *)&peer_addr));
-            break;
+            continue;
         }
         if (peer_addr.sin_family != AF_INET || addrlen != sizeof(struct sockaddr_in)) {
             log_warn("received a package from unsupported address: sa_family %d, addrlen %d", peer_addr.sin_family, addrlen);
-            break;
+            continue;
         }
         unsigned short pkg_len = ntohl(buf.len_buf);
         if (pkg_len != ret - SB_NET_BUF_HEADER_SIZE) {
             log_warn("received udp package length(%d) != declared length(%d) from %s", ret - SB_NET_BUF_HEADER_SIZE, pkg_len, sb_util_human_endpoint((struct sockaddr *)&peer_addr));
-            break;
+            continue;
         }
         // full package is read
         struct sb_connection * conn, * existing_conn = 0;
@@ -457,32 +457,31 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
         unsigned int type = ntohl(buf.type_buf);
         if (type == SB_PKG_TYPE_INIT_1) {
             if (existing_conn) {
-                log_warn("received INIT pkg from %s, resetting", existing_conn->desc);
-                sb_connection_del(existing_conn);
-                existing_conn = 0;
+                log_debug("received INIT pkg from %s, ignoring", existing_conn->desc);
+                continue;
             }
             conn = sb_connection_new(app, fd, SB_NET_MODE_UDP, peer_addr);
             if (!conn) {
                 log_error("failed to init connection for client %s", sb_util_human_endpoint((struct sockaddr *)&peer_addr));
-                break;
+                continue;
             }
             /* queue a cookie to send to client */
             if (sb_util_random(conn->cookie, SB_COOKIE_SIZE) < 0) {
                 log_error("failed to generate cookie data for connection %s", conn->desc);
-                break;
+                continue;
             }
         } else {
             if (existing_conn) {
                 conn = existing_conn;
             } else {
                 log_warn("no connection for incoming pkg from %s", sb_util_human_endpoint((struct sockaddr *)&peer_addr));
-                break;
+                continue;
             }
         }
         struct sb_package * pkg = sb_package_new(type, (char *)buf.pkg_buf, pkg_len);
         if (!pkg) {
             log_error("failed to create a sb_package for %s, dropping", conn->desc);
-            break;
+            continue;
         }
         if (!sb_conn_net_received_pkg(conn, pkg)) {
             free(pkg->ipdata);
@@ -495,7 +494,7 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
             }
             sb_connection_del(conn);
             conn = 0;
-            break;
+            continue;
         }
         if (conn->n2t_pkg_count > 0) {
             enable_tun_write = true;
@@ -558,7 +557,7 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
                         }
                         sb_connection_del(conn);
                         conn = 0;
-                        break;
+                        continue;
                     }
                 } else {
                     TAILQ_REMOVE(&(conn->packages_t2n), writing_pkg, entries);
