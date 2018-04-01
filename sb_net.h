@@ -92,6 +92,8 @@ int sb_client_socket(unsigned int mode, struct sockaddr_in * server_addr, sockle
 
 int sb_server_socket(unsigned int mode, struct sockaddr_in * listen_addr, socklen_t addr_len);
 
+int sb_set_no_frament(int fd);
+
 int sb_net_io_buf_init(struct sb_net_io_buf * io_buf, struct sb_connection * conn);
 
 void sb_net_io_buf_del(struct sb_net_io_buf * io_buf);

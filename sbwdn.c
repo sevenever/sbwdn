@@ -335,7 +335,7 @@ void sb_watchdog(evutil_socket_t fd, short what, void * data) {
 
         conn->since_last_keepalive += app->watchdog_interval;
         log_trace("conn since_last_keepalive %d %s", conn->since_last_keepalive, conn->desc);
-        if (conn->since_last_keepalive > SB_KEEPALIVE_TIMEOUT) {
+        if (conn->since_last_keepalive >= SB_KEEPALIVE_TIMEOUT) {
             log_debug("sending a keepalive pkg to %s", conn->desc);
             struct sb_package * ka_pkg = sb_package_new(SB_PKG_TYPE_KEEPALIVE_6, 0, 0);
             if (!ka_pkg) {

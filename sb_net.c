@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/ioctl.h>
 
 #include "sb_log.h"
 #include "sb_util.h"
@@ -25,6 +26,11 @@ int sb_client_socket(unsigned int mode, struct sockaddr_in * server_addr, sockle
         int ret = connect(fd, (struct sockaddr *)server_addr, addr_len);
         if (ret<0) {
             log_fatal("failed to connect to server %s", sb_util_strerror(errno));
+            return -1;
+        }
+    } else {
+        if (sb_set_no_frament(fd) < 0) {
+            log_error("failed to set no fragment");
             return -1;
         }
     }
@@ -58,9 +64,16 @@ int sb_server_socket(unsigned int mode, struct sockaddr_in * listen_addr, sockle
         log_fatal("failed to bind: %s", sb_util_strerror(errno));
         return -1;
     }
-    if (mode == SB_NET_MODE_TCP && listen(server_fd, 5) < 0) {
+    if (mode == SB_NET_MODE_TCP) {
+        if (listen(server_fd, 5) < 0) {
         log_fatal("failed to listen: %s", sb_util_strerror(errno));
         return -1;
+        }
+    } else {
+        if (sb_set_no_frament(server_fd) < 0) {
+            log_error("failed to set no fragment");
+            return -1;
+        }
     }
     if (evutil_make_socket_closeonexec(server_fd) < 0) {
         log_fatal("failed to set server socket to closeonexec: %s", sb_util_strerror(errno));
@@ -74,6 +87,30 @@ int sb_server_socket(unsigned int mode, struct sockaddr_in * listen_addr, sockle
     }
 
     return server_fd;
+}
+
+int sb_set_no_frament(int fd) {
+#if defined(IP_DONTFRAG)
+    int val = 1;
+    
+    log_debug("setting IP_DONTFRAG");
+    if (setsockopt(fd, IPPROTO_IP, IP_DONTFRAG, &val, sizeof(int)) < 0) {
+        log_error("failed to set IP_DONTFRAG for fd %d", fd);
+        return -1;
+    }
+#elif defined(IP_MTU_DISCOVER)
+    int val = 1;
+    
+    log_debug("setting IP_MTU_DISCOVER");
+    if (setsockopt(fd, IPPROTO_IP, IP_MTU_DISCOVER, &val, sizeof(int)) < 0) {
+        log_error("failed to set IP_DONTFRAG for fd %d", fd);
+        return -1;
+    }
+#else
+    /* really don't know how to do this on mac, just shut compiler up*/
+    SB_NOT_USED(fd);
+#endif
+    return 0;
 }
 
 int sb_net_io_buf_init(struct sb_net_io_buf * io_buf, struct sb_connection * conn) {
@@ -196,6 +233,10 @@ void sb_do_tcp_accept(evutil_socket_t listen_fd, short what, void * data) {
         if (evutil_make_socket_nonblocking(client_fd) < 0) {
             log_error("failed to set client socket to nonblock: %s", sb_util_strerror(errno));
             close(client_fd);
+            return;
+        }
+        if (sb_set_no_frament(client_fd) < 0) {
+            log_error("failed to set no fragment");
             return;
         }
         struct sb_app * app = data;

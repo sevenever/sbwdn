@@ -11,6 +11,11 @@
 #include "sb_util.h"
 #include "sb_config.h"
 
+#define SB_DEFAULT_NET_MODE "udp"
+#define SB_DEFAULT_NET_PORT 812
+#define SB_DEFAULT_NET_MTU  1400
+#define SB_DEFAULT_LOG_LEVEL  "info"
+
 struct sb_config * sb_config_read(const char * config_file) {
     int failed = 0;
     struct sb_config * config = 0;
@@ -30,14 +35,14 @@ struct sb_config * sb_config_read(const char * config_file) {
         {
             CFG_STR("mode", "", CFGF_NONE),
             CFG_STR("dev", "", CFGF_NONE),
-            CFG_STR("net", "udp", CFGF_NONE),
+            CFG_STR("net", SB_DEFAULT_NET_MODE, CFGF_NONE),
             CFG_STR("bind", "", CFGF_NONE),
             CFG_STR("remote", "", CFGF_NONE),
-            CFG_INT("port", 812, CFGF_NONE),
+            CFG_INT("port", SB_DEFAULT_NET_PORT, CFGF_NONE),
             CFG_STR("addr", "", CFGF_NONE),
             CFG_STR("mask", "", CFGF_NONE),
-            CFG_INT("mtu", 1500, CFGF_NONE),
-            CFG_STR("log", "info", CFGF_NONE),
+            CFG_INT("mtu", SB_DEFAULT_NET_MTU, CFGF_NONE),
+            CFG_STR("log", SB_DEFAULT_LOG_LEVEL, CFGF_NONE),
             CFG_END()
 
         };
