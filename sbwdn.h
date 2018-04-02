@@ -51,7 +51,7 @@ struct sb_app {
     TAILQ_HEAD(, sb_connection) conns;
 };
 
-struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_file);
+struct sb_app * sb_app_new();
 
 void sb_app_del(struct sb_app * app);
 

@@ -212,6 +212,7 @@ int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
                 read_buf->cur_p = read_buf->buf->pkg_buf;
                 read_buf->state = PKG;
             } else if (read_buf->state == PKG) {
+                log_trace("a full package of length %d is read from %s", read_buf->pkg_len, read_buf->conn->desc);
                 // full package is read, construct a sb_package, put into conn->packages_n2t
                 struct sb_package * pkg = sb_package_new(ntohl(read_buf->buf->type_buf), read_buf->buf->pkg_buf, read_buf->pkg_len);
                 if (!pkg) {
@@ -237,12 +238,14 @@ int sb_net_io_buf_write(struct sb_net_io_buf * write_buf, int fd) {
     int ret = send(fd, write_buf->cur_p, buflen, 0);
     if (ret < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            log_trace("net is not writable to %s", write_buf->conn->desc);
             return 0;
         }
         // error
         log_error("failed to send to net %s", write_buf->conn->desc);
         return -1;
     } else {
+        log_trace("read %d bytes from %s", ret, write_buf->conn->desc);
         write_buf->cur_p += ret;
         if (ret == buflen) {
             write_buf->cur_pkg = 0;
@@ -321,7 +324,6 @@ void sb_try_client_connect(evutil_socket_t notused, short what, void * data) {
             log_error("failed to init connection for net fd %d", client_fd);
             break;
         }
-        sb_connection_set_vpn_peer(conn, app->config->paddr);
 
         log_info("saying hello to server");
         sb_connection_say_hello(conn);
@@ -361,6 +363,7 @@ void sb_schedule_reconnect(struct sb_app * app) {
     }
     /* failed, retry later */
     if(!app->reconnect_event) {
+        log_trace("creating reconnect_event");
         app->reconnect_event = event_new(app->eventbase, -1, 0, sb_try_client_connect, app);
     }
     struct timeval interval;

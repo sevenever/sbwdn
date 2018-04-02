@@ -54,7 +54,9 @@ void sb_conn_set_timeout(struct sb_connection * conn, int newstate);
 
 #define sb_connection_change_net_state(conn, newstate) \
     do { \
-        log_trace("connection net_state changing from %d to %d: %s", conn->net_state, newstate, conn->desc); \
+        if (conn->net_state != newstate) { \
+            log_info("connection net_state changing from %d to %d: %s", conn->net_state, newstate, conn->desc); \
+        } \
         conn->net_state = newstate; \
         if (conn->net_state == TERMINATED_4) { \
             if (conn->app->config->app_mode == SB_CLIENT) { \

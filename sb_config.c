@@ -45,7 +45,7 @@ struct sb_config * sb_config_read(const char * config_file) {
 
         };
 
-        log_info("reading config file: %s", config_file);
+        log_debug("reading config file: %s", config_file);
         cfg = cfg_init(opts, CFGF_NONE);
         int parse_ret = cfg_parse(cfg, config_file);
         if (parse_ret == CFG_FILE_ERROR) {
@@ -71,10 +71,10 @@ struct sb_config * sb_config_read(const char * config_file) {
             failed = 1;
             break;
         }
-        log_info("app mode is set to %s mode", app_mode_str);
+        log_debug("app mode is set to %s mode", app_mode_str);
 
         strncpy(config->dev, cfg_getstr(cfg, "dev"), sizeof(config->dev));
-        log_info("device name in config file: [%s]", config->dev);
+        log_debug("device name in config file: [%s]", config->dev);
 
         const char * app_net_str = cfg_getstr(cfg, "net");
         if (strcmp(app_net_str, "tcp") == 0) {
@@ -97,7 +97,7 @@ struct sb_config * sb_config_read(const char * config_file) {
             failed = 1;
             break;
         }
-        log_info("network mode is set to %s", app_net_str);
+        log_debug("network mode is set to %s", app_net_str);
 
         if (config->app_mode == SB_SERVER) {
             const char * bind_str = cfg_getstr(cfg, "bind");
@@ -111,7 +111,7 @@ struct sb_config * sb_config_read(const char * config_file) {
                 failed = 1;
                 break;
             }
-            log_info("bind address is set to %s", bind_str);
+            log_debug("bind address is set to %s", bind_str);
 
             const char * addr_str = cfg_getstr(cfg, "addr");
             if (strlen(addr_str) == 0) {
@@ -123,7 +123,7 @@ struct sb_config * sb_config_read(const char * config_file) {
                 failed = 1;
                 break;
             }
-            log_info("local address is set to %s", addr_str);
+            log_debug("local address is set to %s", addr_str);
 
             const char * mask_str = cfg_getstr(cfg, "mask");
             if (strlen(mask_str) == 0) {
@@ -135,7 +135,7 @@ struct sb_config * sb_config_read(const char * config_file) {
                 failed = 1;
                 break;
             }
-            log_info("network mask is set to %s", mask_str);
+            log_debug("network mask is set to %s", mask_str);
         } else {
             strncpy(config->remote, cfg_getstr(cfg, "remote"), sizeof(config->remote));
             if (strlen(config->remote) == 0) {
@@ -143,14 +143,14 @@ struct sb_config * sb_config_read(const char * config_file) {
                 failed = 1;
                 break;
             }
-            log_info("remote address is set to %s", config->remote);
+            log_debug("remote address is set to %s", config->remote);
         }
 
         config->port = cfg_getint(cfg, "port");
-        log_info("net port is set to %d", config->port);
+        log_debug("net port is set to %d", config->port);
 
         config->mtu = cfg_getint(cfg, "mtu");
-        log_info("net mtu is set to %d", config->mtu);
+        log_debug("net mtu is set to %d", config->mtu);
 
         char * log_str = cfg_getstr(cfg, "log");
         if (strcmp(log_str, "trace") == 0) {
@@ -171,13 +171,13 @@ struct sb_config * sb_config_read(const char * config_file) {
             log_warn("unkown log level %s, will default to info", log_str);
             config->log = LOG_INFO;
         }
-        log_info("log level is set to %s", config->log == LOG_INFO ? "info" : log_str);
+        log_debug("log level is set to %s", config->log == LOG_INFO ? "info" : log_str);
 
         strncpy(config->logfile, cfg_getstr(cfg, "logfile"), sizeof(config->logfile));
-        log_info("log file is set to [%s]", config->logfile);
+        log_debug("log file is set to [%s]", config->logfile);
 
         strncpy(config->routefile, cfg_getstr(cfg, "routefile"), sizeof(config->routefile));
-        log_info("route file is set to [%s]", config->routefile);
+        log_debug("route file is set to [%s]", config->routefile);
 
         /* if any error just ignore */
         if (config->app_mode == SB_SERVER && strlen(config->routefile) != 0) {
@@ -261,7 +261,7 @@ int sb_parse_rt_file(struct sb_config * config) {
         }
     }
     config->rt_cnt = i;
-    log_info("total route count: %d", config->rt_cnt);
+    log_debug("total route count: %d", config->rt_cnt);
 
     fclose(f);
     if (line) {

@@ -157,18 +157,18 @@ void sb_connection_del(struct sb_connection * conn) {
 
 void sb_connection_set_vpn_peer(struct sb_connection * conn, struct in_addr peer_vpn_addr) {
     conn->peer_vpn_addr = peer_vpn_addr;
-    char vpnbuf[INET6_ADDRSTRLEN];
     snprintf(conn->desc,
             SB_CONN_DESC_MAX,
             "%s[%s(%s)]",
             (conn->app->config->net_mode == SB_NET_MODE_TCP ? "TCP" : "UDP"),
             sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr),
-            inet_ntop(AF_INET, &conn->peer_vpn_addr, vpnbuf, sizeof(vpnbuf)));
+            sb_util_human_addr(AF_INET, &conn->peer_vpn_addr));
+    log_info("peer vpn address is set to %s", sb_util_human_addr(AF_INET, &peer_vpn_addr));
 }
 
 void sb_connection_say_bye(struct sb_connection * conn) {
     if (conn->net_state == TERMINATED_4) {
-        log_warn("will not say bye in terinated state for %s", conn->desc);
+        log_warn("will not say bye in terminated state for %s", conn->desc);
     } else {
         log_info("saying bye to %s", conn->desc);
         /* put a bye package into packages_t2n, so that it can be send to peer */
@@ -224,7 +224,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 sb_connection_change_net_state(conn, TERMINATED_4);
                 break;
             }
-            log_trace("received init pkg from %s", conn->desc);
+            log_info("hello init pkg from %s", conn->desc);
             struct in_addr client_vpn_addr;
             client_vpn_addr = sb_find_a_addr_lease(app);
             if (client_vpn_addr.s_addr == 0) {
@@ -267,7 +267,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 log_info("received a cookie package, replying cookie to %s", conn->desc);
 
                 /* save to conn */
-                sb_connection_set_vpn_peer(conn, cookie->client_vpn_addr);
+                sb_connection_set_vpn_peer(conn, cookie->server_vpn_addr);
                 memcpy(conn->cookie, cookie->cookie, SB_COOKIE_SIZE);
 
                 /* save server vpn addr, will use when setting route */

@@ -34,7 +34,9 @@ static void libevent_log(int severity, const char *msg) {
         default:
             lvl = LOG_INFO;  break;
     }
-    log_log(lvl, "", 0, "libevent: %s", msg);
+    if (lvl >= sb_logger.lvl) {
+        log_log(lvl, __FILE__, __LINE__, "libevent: %s", msg);
+    }
 }
 
 void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
@@ -51,7 +53,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
         tun_frame_size = read(fd, buf, buflen);
         if (tun_frame_size < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-
+                log_trace("no more data from tun");
             } else {
                 log_error("failed to receive package from tun: %s", sb_util_strerror(errno));
             }
@@ -70,20 +72,17 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
         /* if target ip is one of our client, queue it into that connection's packages_t2n */
         /* if necessary, enable net_writeevent for that connection */
         struct iphdr * iphdr = &(((struct sb_tun_pkg *)buf)->iphdr);
-        struct in_addr saddr = *(struct in_addr *)&(iphdr->saddr);
         struct in_addr daddr = *(struct in_addr *)&(iphdr->daddr);
-        unsigned int ipdatalen = tun_frame_size - sizeof(struct sb_tun_pi);
-        log_trace("src addr: %s", sb_util_human_addr(AF_INET, &saddr));
         log_trace("dst addr: %s", sb_util_human_addr(AF_INET, &daddr));
-        log_trace("ip pkg len: %d", ipdatalen);
 
         struct sb_connection * conn;
         TAILQ_FOREACH(conn, &(app->conns), entries) {
             bool enable_net_write = false;
-            log_trace("conn addr: %d, pkg addr: %d", conn->peer_vpn_addr.s_addr, daddr.s_addr);
+            log_trace("conn addr: %s", sb_util_human_addr(AF_INET, &conn->peer_vpn_addr.s_addr));
+            log_trace("conn pkg addr: %s", sb_util_human_addr(AF_INET, &daddr.s_addr));
             if (app->config->app_mode == SB_CLIENT || conn->peer_vpn_addr.s_addr == daddr.s_addr) {
                 if (conn->net_state != ESTABLISHED_2) {
-                    log_debug("received pkg from tun, but connection is not in established state for %s", conn->desc);
+                    log_warn("received pkg from tun, but connection is not in established state for %s", conn->desc);
                 } else if (conn->t2n_pkg_count >= SB_PKG_BUF_MAX) {
                     /* should I send a ICMP or something? */
                     log_debug("connection queue full %s", conn->desc);
@@ -93,7 +92,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
                         log_error("failed to create a sb_package for %s, dropping", conn->desc);
                         break;
                     }
-                    log_trace("queue a pkg from tun for connection %s", conn->desc);
+                    log_trace("queuing a pkg from tun for connection %s", conn->desc);
                     TAILQ_INSERT_TAIL(&(conn->packages_t2n), pkg, entries);
                     conn->t2n_pkg_count++;
                     enable_net_write = true;
@@ -101,12 +100,12 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
             }
             enable_udp_write |= enable_net_write;
             if(enable_net_write && app->config->net_mode == SB_NET_MODE_TCP) {
-                log_debug("enabling write for %s", conn->desc);
+                log_trace("enabling write for %s", conn->desc);
                 event_add(conn->net_writeevent, 0);
             }
         }
         if (enable_udp_write && app->config->net_mode == SB_NET_MODE_UDP) {
-            log_debug("enabling write for udp");
+            log_trace("enabling write for udp");
             event_add(app->udp_writeevent, 0);
         }
     }
@@ -134,6 +133,7 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
             }
         }
         if (!pkg) {
+            log_trace("no more data from net");
             disable_tun_write = true;
             break;
         }
@@ -142,12 +142,14 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
         int ret = write(fd, pkg->ipdata, pkg->ipdatalen);
         if (ret < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                log_trace("tun is not writable any more");
                 break;
             } else {
                 log_error("failed to write to tun device: %s", sb_util_strerror(errno));
                 break;
             }
         } else {
+            /* tun will not write incomplete*/
             log_trace("sent a pkg with length %d to tun", ret);
             TAILQ_REMOVE(&(conn->packages_n2t), pkg, entries);
             conn->n2t_pkg_count--;
@@ -165,7 +167,7 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
     log_exit_func();
 }
 
-struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_file) {
+struct sb_app * sb_app_new() {
     struct sb_app * app = malloc(sizeof(struct sb_app));
     if (!app) {
         log_error("failed to allocate memory for sb_app: %s", sb_util_strerror(errno));
@@ -174,22 +176,7 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
 
     app->config = 0;
 
-    log_info("reading config file %s", config_file);
-    struct sb_config * config = sb_config_read(config_file);
-    if(!config) {
-        log_fatal("failed to read config file %s", config_file);
-        return 0;
-    }
-    log_info("applying config");
-    if (sb_config_apply(app, config) < 0) {
-        free(config);
-        config = 0;
-        free(app);
-        app = 0;
-        return 0;
-    }
-
-    app->eventbase = eventbase;
+    app->eventbase = 0;
 
     app->sigterm_event = 0;
     app->sigint_event = 0;
@@ -267,8 +254,10 @@ void sb_app_del(struct sb_app * app) {
 
     app->eventbase = 0;
 
-    free(app->config);
-    app->config = 0;
+    if (app->config) {
+        free(app->config);
+        app->config = 0;
+    }
     free(app);
     app = 0;
 }
@@ -286,12 +275,16 @@ void sb_stop_app(struct sb_app * app, int immiedately) {
         struct sb_connection * conn;
         TAILQ_FOREACH(conn, &(app->conns), entries) {
             sb_connection_say_bye(conn);
+            /* here we enable net write, give a chance to net to send bye pkgs to clients
+             * the same for udp below
+             */
             if (conn->net_mode == SB_NET_MODE_TCP) {
                 log_debug("enable net write for %s", conn->desc);
                 event_add(conn->net_writeevent, 0);
             }
         }
-        if (app->config->net_mode & SB_NET_MODE_UDP) {
+        if (app->config->net_mode == SB_NET_MODE_UDP) {
+            log_debug("enable udp write");
             event_add(app->udp_writeevent, 0);
         }
     }
@@ -322,6 +315,26 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
+    /* default log level */
+    sb_logger.lvl = LOG_INFO;
+    sb_logger.fp = fopen(SB_DEFAULT_LOG_PATH, "ae");
+    if (!sb_logger.fp) {
+        log_fatal("failed to open default log file %s", SB_DEFAULT_LOG_PATH);
+        return 1;
+    }
+    if (setvbuf(sb_logger.fp, 0, _IOLBF, 0) != 0) {
+        log_error("failed to set default log file as line bufferred %s", SB_DEFAULT_LOG_PATH);
+        return -1;
+    }
+
+    /* read config file before daemonize, since the path could be a relative path */
+    char * config_file = argv[2];
+    log_trace("reading config file %s", config_file);
+    struct sb_config * config = sb_config_read(config_file);
+    if(!config) {
+        log_fatal("failed to read config file %s", config_file);
+        return 0;
+    }
 #ifndef SB_DEBUG
     log_info("mutating to a daemon, a happy daemon");
     if (daemon(0, 0) < 0) {
@@ -331,37 +344,44 @@ int main(int argc, char ** argv) {
     log_info("hello, I am a daemon");
 #endif
 
-    FILE * pidf = fopen(SB_PID_FILE, "w");
-    if (!pidf) {
-        log_error("failed to open pid file %s", SB_PID_FILE);
-    } else {
-        log_info("written pid %d to %s", getpid(), SB_PID_FILE);
-        fprintf(pidf, "%d", getpid());
-        fclose(pidf);
-        pidf = 0;
+    {
+        /* write pid file */
+        FILE * pidf = fopen(SB_PID_FILE, "w");
+        if (!pidf) {
+            log_error("failed to open pid file %s", SB_PID_FILE);
+        } else {
+            log_info("written pid %d to %s", getpid(), SB_PID_FILE);
+            fprintf(pidf, "%d", getpid());
+            fclose(pidf);
+            pidf = 0;
+        }
     }
 
-    /* default log level */
-    sb_logger.lvl = LOG_INFO;
-    sb_logger.fp = fopen(SB_DEFAULT_LOG_PATH, "ae");
-    if (!sb_logger.fp) {
-        log_fatal("failed to open default log file %s", SB_DEFAULT_LOG_PATH);
+    struct sb_app * app = sb_app_new();
+    if (!app) {
+        log_fatal("faied to init sb_app");
         return 1;
     }
-    if (setvbuf(sb_logger.fp, 0, _IONBF, 0) != 0) {
-        log_error("failed to set default log file as unbuffered %s", SB_DEFAULT_LOG_PATH);
-        return -1;
+    log_info("applying config");
+    if (sb_config_apply(app, config) < 0) {
+        free(config);
+        config = 0;
+        free(app);
+        app = 0;
+        return 0;
     }
 
+
     /* setup libevent */
+    log_info("setting up libevent");
     // setup libevent log
     event_set_log_callback(libevent_log);
 
-    log_info("setting up libevent");
     struct event_config * event_cfg = event_config_new();
     struct event_base * eventbase = event_base_new_with_config(event_cfg);
 #ifdef __APPLE__
     /* apple's tun don't support kqueue*/
+    log_info("we are on mac, use select or poll");
     event_config_avoid_method(event_cfg, "kqueue");
 #endif
     event_config_free(event_cfg);
@@ -372,12 +392,7 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-    char * config_file = argv[2];
-    struct sb_app * app = sb_app_new(eventbase, config_file);
-    if (!app) {
-        log_fatal("faied to init sb_app");
-        return 1;
-    }
+    app->eventbase = eventbase;
 
     /* setup signal handlers */
     /* call sighup_function on a HUP signal */
@@ -421,6 +436,7 @@ int main(int argc, char ** argv) {
     app->tun_writeevent = tun_writeevent;
 
     if (app->config->app_mode == SB_SERVER) {
+        log_info("run as server");
         log_info("setting up vpn address for server");
         if (sb_config_tun_addr(app->tunname, &app->config->addr, &app->config->mask, app->config->mtu) < 0) {
             log_fatal("failed to setup tun address");
@@ -437,6 +453,11 @@ int main(int argc, char ** argv) {
             log_fatal("failed to setup server socket for ipv4.");
             return 1;
         } else {
+            log_info("listening on %s %s:%d",
+                    (app->config->net_mode == SB_NET_MODE_TCP ? "TCP" : "UDP"),
+                    sb_util_human_addr(AF_INET, &app->config->bind),
+                    app->config->port);
+
             if (app->config->net_mode == SB_NET_MODE_TCP) {
                 struct event *accept_ev;
                 accept_ev = event_new(eventbase, server_fd, EV_READ|EV_PERSIST, sb_do_tcp_accept, app);
@@ -454,6 +475,7 @@ int main(int argc, char ** argv) {
             }
         }
     } else {
+        log_info("run as client");
         /* client mode */
         sb_try_client_connect(-1, 0, app);
     }
@@ -462,7 +484,11 @@ int main(int argc, char ** argv) {
     event_base_dispatch(eventbase);
 
     event_base_free(eventbase);
+
+    log_info("destroying myself, bye");
+
     sb_app_del(app);
+
     return 0;
 }
 
