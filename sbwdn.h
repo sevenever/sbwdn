@@ -8,6 +8,8 @@
 #include "sb_config.h"
 #include "sb_net.h"
 
+#define SB_PID_FILE "/var/run/sbwdn.pid"
+
 /* how long we wait for sending bye to peer before exit, in seconds*/
 #define SB_STOP_WAITING 1
 

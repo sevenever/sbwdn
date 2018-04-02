@@ -172,11 +172,15 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
         return 0;
     }
 
+    app->config = 0;
+
+    log_info("reading config file %s", config_file);
     struct sb_config * config = sb_config_read(config_file);
     if(!config) {
         log_fatal("failed to read config file %s", config_file);
         return 0;
     }
+    log_info("applying config");
     if (sb_config_apply(app, config) < 0) {
         free(config);
         config = 0;
@@ -313,6 +317,30 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
+    if (geteuid() != 0) {
+        log_fatal("only root can run, exiting");
+        return 1;
+    }
+
+#ifndef SB_DEBUG
+    log_info("mutating to a daemon, a happy daemon");
+    if (daemon(0, 0) < 0) {
+        log_fatal("failed to mutate to a daemon, are you oric?");
+        return 1;
+    }
+    log_info("hello, I am a daemon");
+#endif
+
+    FILE * pidf = fopen(SB_PID_FILE, "w");
+    if (!pidf) {
+        log_error("failed to open pid file %s", SB_PID_FILE);
+    } else {
+        log_info("written pid %d to %s", getpid(), SB_PID_FILE);
+        fprintf(pidf, "%d", getpid());
+        fclose(pidf);
+        pidf = 0;
+    }
+
     /* default log level */
     sb_logger.lvl = LOG_INFO;
     sb_logger.fp = fopen(SB_DEFAULT_LOG_PATH, "ae");
@@ -326,9 +354,17 @@ int main(int argc, char ** argv) {
     }
 
     /* setup libevent */
-    struct event_base * eventbase;
     // setup libevent log
     event_set_log_callback(libevent_log);
+
+    log_info("setting up libevent");
+    struct event_config * event_cfg = event_config_new();
+    struct event_base * eventbase = event_base_new_with_config(event_cfg);
+#ifdef __APPLE__
+    /* apple's tun don't support kqueue*/
+    event_config_avoid_method(event_cfg, "kqueue");
+#endif
+    event_config_free(event_cfg);
 
     eventbase = event_base_new();
     if (!eventbase) {
@@ -345,11 +381,13 @@ int main(int argc, char ** argv) {
 
     /* setup signal handlers */
     /* call sighup_function on a HUP signal */
+    log_info("setting up signal handlers");
     app->sigterm_event = evsignal_new(eventbase, SIGTERM, sb_sigterm_handler, app);
     app->sigint_event = evsignal_new(eventbase, SIGINT, sb_sigint_handler, app);
     event_add(app->sigterm_event, 0);
     event_add(app->sigint_event, 0);
 
+    log_info("setting up tun device");
     if (strncmp(app->config->dev, "auto", IFNAMSIZ) == 0) {
         log_info("dev in config file is auto, will allow system allocate name");
         app->tunname[0] = 0;
@@ -365,19 +403,15 @@ int main(int argc, char ** argv) {
         log_fatal("failed to setup tun device");
         return 1;
     }
+    log_info("tun device created with fd %d", tun_fd);
+
     if (evutil_make_socket_nonblocking(tun_fd) < 0) {
         log_fatal("failed to set tun_fd to nonblock: %s", sb_util_strerror(errno));
         return 1;
     }
     app->tun_fd = tun_fd;
 
-    log_info("mutating to a daemon, a happy daemon");
-    if (daemon(0, 0) < 0) {
-        log_fatal("failed to mutate to a daemon, are you oric?");
-        return 1;
-    }
-    log_info("hello, I am a daemon");
-
+    log_info("starting tun IO");
     struct event * tun_readevent = event_new(eventbase, tun_fd, EV_READ|EV_PERSIST, sb_do_tun_read, app);
     struct event * tun_writeevent = event_new(eventbase, tun_fd, EV_WRITE|EV_PERSIST, sb_do_tun_write, app);
     event_add(tun_readevent, 0);
@@ -387,6 +421,7 @@ int main(int argc, char ** argv) {
     app->tun_writeevent = tun_writeevent;
 
     if (app->config->app_mode == SB_SERVER) {
+        log_info("setting up vpn address for server");
         if (sb_config_tun_addr(app->tunname, &app->config->addr, &app->config->mask, app->config->mtu) < 0) {
             log_fatal("failed to setup tun address");
             return 1;

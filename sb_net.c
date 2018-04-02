@@ -323,8 +323,10 @@ void sb_try_client_connect(evutil_socket_t notused, short what, void * data) {
         }
         sb_connection_set_vpn_peer(conn, app->config->paddr);
 
+        log_info("saying hello to server");
         sb_connection_say_hello(conn);
 
+        log_debug("starting network IO");
         if (app->config->net_mode == SB_NET_MODE_TCP) {
             event_add(conn->net_readevent, 0);
             event_add(conn->net_writeevent, 0);
