@@ -138,11 +138,8 @@ int sb_config_tun_addr(const char * tunname, const struct in_addr * addr, const 
         log_info("set mtu for tun to %d", mtu);
     } while(0);
 
-    if (fail) {
-        close(s);
-        return -1;
-    }
+    close(s);
 
-    return 0;
+    return fail ? -1 : 0;
 }
 

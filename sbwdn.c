@@ -201,9 +201,6 @@ struct sb_app * sb_app_new(struct event_base * eventbase, const char * config_fi
 
     app->dont_reconnect = 0;
 
-    app->watchdog_event = 0;
-    app->watchdog_interval = SB_DEFAULT_WATCHDOG_INTERVAL;
-
     TAILQ_INIT(&(app->conns));
 
     app->conn_timeout_oracle[NEW_0] = 10;
@@ -228,11 +225,6 @@ void sb_app_del(struct sb_app * app) {
         conn = conn2;
     }
 
-    if (app->watchdog_event) {
-        event_del(app->watchdog_event);
-        event_free(app->watchdog_event);
-        app->watchdog_event = 0;
-    }
     if (app->reconnect_event) {
         event_del(app->reconnect_event);
         event_free(app->reconnect_event);

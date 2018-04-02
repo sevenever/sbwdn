@@ -6,6 +6,7 @@
 #include "sb_net.h"
 
 #define SB_PROTO_MULTI_SYNC_NUM 3
+#define SB_PROTO_MULTI_RT_NUM 2
 
 /* seconds between send keepalive */
 #define SB_KEEPALIVE_INTERVAL (60 * 10)
@@ -54,13 +55,14 @@ void sb_conn_set_timeout(struct sb_connection * conn, int newstate);
 #define sb_connection_change_net_state(conn, newstate) \
     do { \
         log_trace("connection net_state changing from %d to %d: %s", conn->net_state, newstate, conn->desc); \
-        sb_conn_set_timeout(conn, newstate); \
         conn->net_state = newstate; \
         if (conn->net_state == TERMINATED_4) { \
             if (conn->app->config->app_mode == SB_CLIENT) { \
                 sb_schedule_reconnect(conn->app); \
             } \
             sb_connection_del(conn); \
+        } else { \
+            sb_conn_set_timeout(conn, newstate); \
         } \
     } while(0);
 

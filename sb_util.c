@@ -64,6 +64,7 @@ const char * sb_util_strerror(int errnum) {
 
 int sb_util_random(char * data, unsigned int len) {
     static int urfd = -1;
+    int fail = 0;
     
     if (urfd < 0) {
         urfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
@@ -79,16 +80,22 @@ int sb_util_random(char * data, unsigned int len) {
         ret = read(urfd, p, len);
         if (ret < 0) {
             log_error("failed to read /dev/urandom %s", sb_util_strerror(errno));
-            return -1;
+            fail = 1;
+            break;
         } else if (ret == 0) {
             log_error("read EOF from /dev/urandom, WTF");
-            return -1;
+            fail = 1;
+            break;
         }
         len -= ret;
         p += ret;
     }
+    if (urfd >= 0) {
+        close(urfd);
+        urfd = -1;
+    }
 
-    return 0;
+    return fail ? -1 : 0;
 }
 
 void sb_util_set_timeout(struct event * ev, unsigned int timeout) {

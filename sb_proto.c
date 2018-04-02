@@ -438,16 +438,22 @@ void sb_conn_set_timeout(struct sb_connection * conn, int newstate) {
 
 void sb_send_route_info(struct sb_connection * conn) {
     struct sb_config * config = conn->app->config;
-    log_info("sending %d routing info to client %s", config->rt_cnt, conn->desc);
-    for (unsigned int i = 0; i < config->rt_cnt; i++) {
-        struct sb_package * rt_pkg = sb_package_new(SB_PKG_TYPE_ROUTE_5, &config->rt[i], sizeof(struct sb_rt));
-        if (!rt_pkg) {
-            log_error("failed to create a route package");
-            continue;
-        }
+    unsigned int mtu = config->mtu;
 
-        TAILQ_INSERT_TAIL(&(conn->packages_t2n), rt_pkg, entries);
-        conn->t2n_pkg_count++;
+    log_info("%d routing info to be sent to client %s", config->rt_cnt, conn->desc);
+    for (unsigned int i = 0; i < config->rt_cnt;) {
+        int n = min(mtu / sizeof(struct sb_rt), config->rt_cnt - i);
+        for (int j = 0; j < SB_PROTO_MULTI_RT_NUM; j++) {
+            log_info("sending %d routing info to client %s", n, conn->desc);
+            struct sb_package * rt_pkg = sb_package_new(SB_PKG_TYPE_ROUTE_5, &config->rt[i], n * sizeof(struct sb_rt));
+            if (!rt_pkg) {
+                log_error("failed to create a route package");
+                continue;
+            }
+            TAILQ_INSERT_TAIL(&(conn->packages_t2n), rt_pkg, entries);
+            conn->t2n_pkg_count++;
+        }
+        i += n;
     }
 }
 
@@ -460,9 +466,19 @@ void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) 
     }
     log_warn("received a route package from server");
     struct sb_rt * rt = (struct sb_rt *)pkg->ipdata;
-    sb_modify_route(SB_RT_OP_ADD, &rt->dst, &rt->mask, &conn->vpn_addr);
-    // save, delete when disconnect
-    config->rt[config->rt_cnt++] = *rt;
+    int n = pkg->ipdatalen / sizeof(struct sb_rt);
+    for (int i = 0; i < n; i++, rt++) {
+        if (config->rt_cnt < SB_RT_MAX) {
+            log_trace("adding routing for %s %s", sb_util_human_addr(AF_INET, &rt->dst), conn->desc);
+            if (sb_modify_route(SB_RT_OP_ADD, &rt->dst, &rt->mask, &conn->vpn_addr) == 0) {
+                // save, delete when disconnect
+                config->rt[config->rt_cnt++] = *rt;
+            }
+            log_trace("added routing for %s %s", sb_util_human_addr(AF_INET, &rt->dst), conn->desc);
+        } else {
+            log_warn("max route info reached, ignoring %s %s", sb_util_human_addr(AF_INET, &rt->dst), conn->desc);
+        }
+    }
 }
 
 struct in_addr sb_find_a_addr_lease(struct sb_app * app) {

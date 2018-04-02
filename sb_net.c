@@ -16,77 +16,106 @@
 #include "sbwdn.h"
 
 int sb_client_socket(unsigned int mode, struct sockaddr_in * server_addr, socklen_t addr_len) {
-    int fd;
-    /* Create our listening socket. */
-    fd = socket(server_addr->sin_family, (mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
-    if (fd < 0) {
-        log_fatal("failed to create client socket: %s", errno, sb_util_strerror(errno));
-        return -1;
-    }
-    if (mode == SB_NET_MODE_TCP) {
-        int ret = connect(fd, (struct sockaddr *)server_addr, addr_len);
-        if (ret<0) {
-            log_fatal("failed to connect to server %s", sb_util_strerror(errno));
-            return -1;
+    int fd = -1;
+    int fail = 0;
+    
+    do {
+        /* Create our listening socket. */
+        fd = socket(server_addr->sin_family, (mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
+        if (fd < 0) {
+            log_fatal("failed to create client socket: %s", errno, sb_util_strerror(errno));
+            fail = 1;
+            break;
         }
-    } else {
-        if (sb_set_no_frament(fd) < 0) {
-            log_error("failed to set no fragment");
-            return -1;
+        if (mode == SB_NET_MODE_TCP) {
+            int ret = connect(fd, (struct sockaddr *)server_addr, addr_len);
+            if (ret<0) {
+                log_fatal("failed to connect to server %s", sb_util_strerror(errno));
+                fail = 1;
+                break;
+            }
+        } else {
+            if (sb_set_no_frament(fd) < 0) {
+                log_error("failed to set no fragment");
+                fail = 1;
+                break;
+            }
         }
+        if (evutil_make_socket_closeonexec(fd) < 0) {
+            log_fatal("failed to set client socket to closeonexec: %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+        /* Set the socket to non-blocking, this is essential in event
+         * based programming with libevent. */
+        if (evutil_make_socket_nonblocking(fd) < 0) {
+            log_fatal("failed to set client socket to nonblock: %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+    } while(0);
+
+    if (fail && fd >= 0) {
+        close(fd);
+        fd = -1;
     }
-    if (evutil_make_socket_closeonexec(fd) < 0) {
-        log_fatal("failed to set client socket to closeonexec: %s", sb_util_strerror(errno));
-        return -1;
-    }
-    /* Set the socket to non-blocking, this is essential in event
-     * based programming with libevent. */
-    if (evutil_make_socket_nonblocking(fd) < 0) {
-        log_fatal("failed to set client socket to nonblock: %s", sb_util_strerror(errno));
-        return -1;
-    }
+    return fd;
 
     return fd;
 }
 
 int sb_server_socket(unsigned int mode, struct sockaddr_in * listen_addr, socklen_t addr_len) {
-    int server_fd;
+    int server_fd = -1;
+    int fail = 0;
     /* Create our listening socket. */
-    server_fd = socket(listen_addr->sin_family, (mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
-    if (server_fd < 0) {
-        log_fatal("failed to create server socket: %s", sb_util_strerror(errno));
-        return -1;
-    }
-    if (evutil_make_listen_socket_reuseable(server_fd) < 0) {
-        log_fatal("failed to set server socket to reuseable: %s", sb_util_strerror(errno));
-        return -1;
-    }
-    if (bind(server_fd, (struct sockaddr *)listen_addr, addr_len) < 0) {
-        log_fatal("failed to bind: %s", sb_util_strerror(errno));
-        return -1;
-    }
-    if (mode == SB_NET_MODE_TCP) {
-        if (listen(server_fd, 5) < 0) {
-        log_fatal("failed to listen: %s", sb_util_strerror(errno));
-        return -1;
+    do {
+        server_fd = socket(listen_addr->sin_family, (mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
+        if (server_fd < 0) {
+            log_fatal("failed to create server socket: %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
         }
-    } else {
-        if (sb_set_no_frament(server_fd) < 0) {
-            log_error("failed to set no fragment");
-            return -1;
+        if (evutil_make_listen_socket_reuseable(server_fd) < 0) {
+            log_fatal("failed to set server socket to reuseable: %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
         }
-    }
-    if (evutil_make_socket_closeonexec(server_fd) < 0) {
-        log_fatal("failed to set server socket to closeonexec: %s", sb_util_strerror(errno));
-        return -1;
-    }
-    /* Set the socket to non-blocking, this is essential in event
-     * based programming with libevent. */
-    if (evutil_make_socket_nonblocking(server_fd) < 0) {
-        log_fatal("failed to set server socket to nonblock: %s", sb_util_strerror(errno));
-        return -1;
-    }
+        if (bind(server_fd, (struct sockaddr *)listen_addr, addr_len) < 0) {
+            log_fatal("failed to bind: %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+        if (mode == SB_NET_MODE_TCP) {
+            if (listen(server_fd, 5) < 0) {
+                log_fatal("failed to listen: %s", sb_util_strerror(errno));
+                fail = 1;
+                break;
+            }
+        } else {
+            if (sb_set_no_frament(server_fd) < 0) {
+                log_error("failed to set no fragment");
+                fail = 1;
+                break;
+            }
+        }
+        if (evutil_make_socket_closeonexec(server_fd) < 0) {
+            log_fatal("failed to set server socket to closeonexec: %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
+        /* Set the socket to non-blocking, this is essential in event
+         * based programming with libevent. */
+        if (evutil_make_socket_nonblocking(server_fd) < 0) {
+            log_fatal("failed to set server socket to nonblock: %s", sb_util_strerror(errno));
+            fail = 1;
+            break;
+        }
 
+    } while (0);
+    if (fail && server_fd >= 0) {
+        close(server_fd);
+        server_fd = -1;
+    }
     return server_fd;
 }
 
@@ -663,14 +692,9 @@ int sb_modify_route(unsigned int op, struct in_addr * dst, struct in_addr * netm
         }
     }while(0);
 
-    if(s >= 0) {
-        close(s);
-    }
-    if (fail) {
-        return -1;
-    } else {
-        return 0;
-    }
+    close(s);
+
+    return fail ? -1 : 0;
 #elif defined(__APPLE__)
     SB_NOT_USED(op);
     SB_NOT_USED(dst);

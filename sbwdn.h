@@ -11,6 +11,9 @@
 /* how long we wait for sending bye to peer before exit, in seconds*/
 #define SB_STOP_WAITING 1
 
+#define max(a,b) ((a) > (b) ? (a) : (b))
+#define min(a,b) ((a) < (b) ? (a) : (b))
+
 void sb_do_tun_read(evutil_socket_t fd, short what, void * app);
 
 void sb_do_tun_write(evutil_socket_t fd, short what, void * app);
@@ -40,11 +43,6 @@ struct sb_app {
     struct event * reconnect_event;
 
     int dont_reconnect;
-
-    struct event * watchdog_event;
-    unsigned int watchdog_interval;
-
-    unsigned int keepalive_interval;
 
     int conn_timeout_oracle[CONN_STATE_MAX];
 

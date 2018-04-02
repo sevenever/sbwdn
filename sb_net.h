@@ -8,6 +8,9 @@
 #define PROTO_IPV4 0x0800
 #define PROTO_IPV6 0x08dd
 
+#define SB_NET_MODE_TCP 0x01
+#define SB_NET_MODE_UDP 0x02
+
 #define IP_PKG_SIZE_MAX 65536
 
 #define SB_PKG_BUF_MAX 1024
@@ -18,13 +21,6 @@
 
 /* how long should we wait before next reconnect, max value*/
 #define SB_CLIENT_RETRY_INTERVAL_MAX 300
-
-/* how frequently the watchdog should run, in seconds*/
-#define SB_DEFAULT_WATCHDOG_INTERVAL 10
-
-/* how long should we wait before sending next keepalive*/
-#define SB_KEEPALIVE_TIMEOUT 10 * 60
-
 
 #define SB_RT_OP_ADD 1
 #define SB_RT_OP_DEL 2
