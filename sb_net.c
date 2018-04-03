@@ -245,7 +245,7 @@ int sb_net_io_buf_write(struct sb_net_io_buf * write_buf, int fd) {
         log_error("failed to send to net %s", write_buf->conn->desc);
         return -1;
     } else {
-        log_trace("read %d bytes from %s", ret, write_buf->conn->desc);
+        log_trace("written %d bytes to %s", ret, write_buf->conn->desc);
         write_buf->cur_p += ret;
         if (ret == buflen) {
             write_buf->cur_pkg = 0;

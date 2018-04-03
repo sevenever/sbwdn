@@ -174,7 +174,7 @@ void sb_connection_say_bye(struct sb_connection * conn) {
     } else {
         log_info("saying bye to %s", conn->desc);
         /* put a bye package into packages_t2n, so that it can be send to peer */
-        struct sb_package * bye_pkg = sb_package_new(SB_PKG_TYPE_BYE_3, 0, 0);
+        struct sb_package * bye_pkg = sb_package_new(SB_PKG_TYPE_BYE_3, SB_DUMMY_PKG_DATA, SB_DUMMY_PKG_DATA_LEN);
         if (!bye_pkg) {
             log_error("failed to create bye pkg");
         }
@@ -196,7 +196,7 @@ void sb_connection_say_hello(struct sb_connection * conn) {
     int pkg_cnt = conn->net_mode == SB_NET_MODE_UDP ? SB_PROTO_MULTI_SYNC_NUM : 1;
     for (int i = 0; i< pkg_cnt; i++) {
         /* put a initial package into packages_t2n, so that it can be send to server */
-        struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, 0, 0);
+        struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, SB_DUMMY_PKG_DATA, SB_DUMMY_PKG_DATA_LEN);
         if (!init_pkg) {
             log_error("failed to create init pkg");
             return;
@@ -389,13 +389,13 @@ void sb_do_conn_send_keepalive(evutil_socket_t fd, short what, void * data) {
     struct sb_connection * conn = (struct sb_connection *)data;
     struct sb_app * app = (struct sb_app *)conn->app;
 
-    struct sb_package * ka_pkg = (struct sb_package *)sb_package_new(SB_PKG_TYPE_KEEPALIVE_6, 0, 0);
+    struct sb_package * ka_pkg = (struct sb_package *)sb_package_new(SB_PKG_TYPE_KEEPALIVE_6, SB_DUMMY_PKG_DATA, SB_DUMMY_PKG_DATA_LEN);
     if (!ka_pkg) {
         log_error("failed to create a keepalive package");
         return;
     }
 
-    log_info("queuing a keepalive pkg to %s", conn->desc);
+    log_trace("queuing a keepalive pkg to %s", conn->desc);
     TAILQ_INSERT_TAIL(&(conn->packages_t2n), ka_pkg, entries);
     conn->t2n_pkg_count++;
     if (conn->net_mode == SB_NET_MODE_TCP && conn->net_writeevent) {
@@ -408,13 +408,17 @@ void sb_do_conn_send_keepalive(evutil_socket_t fd, short what, void * data) {
 void sb_conn_handle_keepalive(struct sb_connection * conn, struct sb_package * pkg) {
     SB_NOT_USED(conn);
     SB_NOT_USED(pkg);
-    log_info("received a keepalive pkg from %s", conn->desc);
+    log_trace("received a keepalive pkg from %s", conn->desc);
 
     if (conn->net_state != ESTABLISHED_2) {
         log_error("received a keepalive pkg but not in established state, instead in %d, %s", conn->net_state, conn->desc);
+    } else {
+        if (conn->keepalive_timer) {
+            unsigned int timeout = conn->app->conn_timeout_oracle[conn->net_state];
+            log_debug("setting a timeout %d seconds in state of %d on %s", timeout, conn->net_state, conn->desc);
+            sb_util_set_timeout(conn->timeout_timer, timeout);
+        }
     }
-    /* this is the trick(danger), if we set net state, the timeout_timer will be reset*/
-    sb_connection_change_net_state(conn, ESTABLISHED_2);
 }
 
 void sb_conn_set_timeout(struct sb_connection * conn, int newstate) {
@@ -422,11 +426,6 @@ void sb_conn_set_timeout(struct sb_connection * conn, int newstate) {
     if (newstate == ESTABLISHED_2) {
         if (conn->keepalive_timer) {
             sb_util_set_timeout(conn->keepalive_timer, SB_KEEPALIVE_INTERVAL);
-        }
-    }
-    if (conn->net_state == ESTABLISHED_2) {
-        if (conn->keepalive_timer) {
-            sb_util_clear_timeout(conn->keepalive_timer);
         }
     }
 

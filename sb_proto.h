@@ -9,7 +9,7 @@
 #define SB_PROTO_MULTI_RT_NUM 2
 
 /* seconds between send keepalive */
-#define SB_KEEPALIVE_INTERVAL (60 * 10)
+#define SB_KEEPALIVE_INTERVAL 10
 
 #define SB_PKG_TYPE_INIT_1 1
 #define SB_PKG_TYPE_DATA_2 2
@@ -17,6 +17,9 @@
 #define SB_PKG_TYPE_COOKIE_4 4
 #define SB_PKG_TYPE_ROUTE_5 5
 #define SB_PKG_TYPE_KEEPALIVE_6 6
+
+#define SB_DUMMY_PKG_DATA "SB"
+#define SB_DUMMY_PKG_DATA_LEN 2
 
 /* this represent an IP package */
 struct sb_package {

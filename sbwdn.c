@@ -200,7 +200,7 @@ struct sb_app * sb_app_new() {
      * is greater than this, we will disconnect.
      * set to SB_KEEPALIVE_INTERVAL * 5 means if we miss 5 keepalives from peer, we will disconnect
      */
-    app->conn_timeout_oracle[ESTABLISHED_2] = SB_KEEPALIVE_INTERVAL * 5;
+    app->conn_timeout_oracle[ESTABLISHED_2] = SB_KEEPALIVE_INTERVAL * 10;
     app->conn_timeout_oracle[CLOSING_3] = 10;
     app->conn_timeout_oracle[TERMINATED_4] = 10;
 
