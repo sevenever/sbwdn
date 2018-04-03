@@ -158,7 +158,7 @@ void sb_connection_del(struct sb_connection * conn) {
 void sb_connection_set_vpn_peer(struct sb_connection * conn, struct in_addr peer_vpn_addr) {
     conn->peer_vpn_addr = peer_vpn_addr;
     static char peer_vpn_addr_buf[INET6_ADDRSTRLEN];
-    strncpy(peer_vpn_addr_buf, sb_util_human_addr(AF_INET, &conn->peer_vpn_addr), sizeof(peer_vpn_addr));
+    strncpy(peer_vpn_addr_buf, sb_util_human_addr(AF_INET, &conn->peer_vpn_addr), sizeof(peer_vpn_addr_buf));
     snprintf(conn->desc,
             SB_CONN_DESC_MAX,
             "%s[%s(%s)]",
