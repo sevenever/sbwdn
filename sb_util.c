@@ -67,7 +67,7 @@ int sb_util_random(char * data, unsigned int len) {
     int fail = 0;
     
     if (urfd < 0) {
-        urfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+        urfd = open("/dev/urandom", O_RDONLY);
         if (urfd < 0) {
             log_error("failed to open /dev/urandom %s", sb_util_strerror(errno));
             return -1;

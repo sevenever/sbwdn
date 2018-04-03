@@ -374,7 +374,7 @@ int main(int argc, char ** argv) {
 
     /* setup libevent */
     log_info("setting up libevent");
-    // setup libevent log
+    /* setup libevent log */
     event_set_log_callback(libevent_log);
 
     struct event_config * event_cfg = event_config_new();

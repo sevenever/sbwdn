@@ -315,7 +315,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
         case ESTABLISHED_2:
             if (pkg->type == SB_PKG_TYPE_DATA_2) {
                 if (conn->n2t_pkg_count >= SB_PKG_BUF_MAX) {
-                    // packages_n2t full
+                    /* packages_n2t full */
                     log_warn("queue full for %s, dropping", conn->desc);
                     break;
                 }
@@ -472,7 +472,7 @@ void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) 
         if (config->rt_cnt < SB_RT_MAX) {
             log_trace("adding routing for %s %s", sb_util_human_addr(AF_INET, &rt->dst), conn->desc);
             if (sb_modify_route(SB_RT_OP_ADD, &rt->dst, &rt->mask, &conn->vpn_addr) == 0) {
-                // save, delete when disconnect
+                /* save, delete when disconnect */
                 config->rt[config->rt_cnt++] = *rt;
             }
             log_trace("added routing for %s %s", sb_util_human_addr(AF_INET, &rt->dst), conn->desc);

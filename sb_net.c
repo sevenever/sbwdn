@@ -189,31 +189,31 @@ int sb_net_io_buf_read(struct sb_net_io_buf * read_buf, int fd) {
             log_trace("no more data available from %s", read_buf->conn->desc);
             return 0;
         } else {
-            // error
+            /* error */
             log_error("failed to receive data from connection %s: %s", read_buf->conn->desc, sb_util_strerror(ret));
             return -1;
         }
     } else if (ret == 0) {
-        // EOF
+        /* EOF */
         return 2;
     } else {
         log_trace("read %d bytes from %s", ret, read_buf->conn->desc);
-        // some bytes were read
+        /* some bytes were read */
         if (ret < buflen) {
-            // read less than we want
+            /* read less than we want */
             read_buf->cur_p += ret;
         } else if (ret > buflen) {
             log_warn("read from %s more bytes than request, impossible", read_buf->conn->desc);
             return -1;
         } else {
-            // read equals we want
+            /* read equals we want */
             if (read_buf->state == HDR) {
                 read_buf->pkg_len = ntohl(read_buf->buf->len_buf);
                 read_buf->cur_p = read_buf->buf->pkg_buf;
                 read_buf->state = PKG;
             } else if (read_buf->state == PKG) {
                 log_trace("a full package of length %d is read from %s", read_buf->pkg_len, read_buf->conn->desc);
-                // full package is read, construct a sb_package, put into conn->packages_n2t
+                /* full package is read, construct a sb_package, put into conn->packages_n2t */
                 struct sb_package * pkg = sb_package_new(ntohl(read_buf->buf->type_buf), read_buf->buf->pkg_buf, read_buf->pkg_len);
                 if (!pkg) {
                     log_error("failed to create a sb_package for %s", read_buf->conn->desc);
@@ -241,7 +241,7 @@ int sb_net_io_buf_write(struct sb_net_io_buf * write_buf, int fd) {
             log_trace("net is not writable to %s", write_buf->conn->desc);
             return 0;
         }
-        // error
+        /* error */
         log_error("failed to send to net %s", write_buf->conn->desc);
         return -1;
     } else {
@@ -416,7 +416,7 @@ void sb_do_tcp_read(evutil_socket_t fd, short what, void * data) {
                 }
             }
         } else if (ret == 2) {
-            // EOF
+            /* EOF */
             log_info("net peer closed connection, closing net connection for %s",  conn->desc);
             sb_connection_change_net_state(conn, TERMINATED_4);
             if (conn->net_state == TERMINATED_4) {
@@ -478,7 +478,7 @@ void sb_do_udp_read(evutil_socket_t fd, short what, void * data) {
             log_warn("received udp package length(%d) != declared length(%d) from %s", ret - SB_NET_BUF_HEADER_SIZE, pkg_len, sb_util_human_endpoint((struct sockaddr *)&peer_addr));
             continue;
         }
-        // full package is read
+        /* full package is read */
         struct sb_connection * conn, * existing_conn = 0;
         TAILQ_FOREACH(conn, &(app->conns), entries) {
             if (sb_util_sockaddr_cmp((struct sockaddr *)&conn->peer_addr, (struct sockaddr *)&peer_addr) == 0) {
@@ -567,7 +567,7 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
         int ret = sb_net_io_buf_write(&(conn->net_write_io_buf), fd);
         if (ret < 0) {
             log_error("failed to write to %s", conn->desc);
-            // close connection?
+            /* close connection? */
         } else if (ret == 0) {
             /* fd not writable, wait */
             break;
