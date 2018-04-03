@@ -25,7 +25,7 @@ make
 
 ## compile sbwdn:
 
-make CC=${STAGING_DIR}/bin/mips-openwrt-linux-uclibc-gcc CFLAGS='--std=gnu99 -I${STAGING_DIR}/../target-mips_34kc_uClibc-0.9.33.2/usr/include -I<source dir of downloaded libconfuse>/src' LFLAGS='-L${STAGING_DIR}/../target-mips_34kc_uClibc-0.9.33.2/usr/lib -L<source dir of downloaded libconfuse>/src/.libs'
+make CC=${STAGING_DIR}/bin/mips-openwrt-linux-uclibc-gcc CFLAGS='--std=gnu99 -I${STAGING_DIR}/../target-mips_34kc_uClibc-0.9.33.2/usr/include -I\<source dir of downloaded libconfuse\>/src' LFLAGS='-L${STAGING_DIR}/../target-mips_34kc_uClibc-0.9.33.2/usr/lib -L\<source dir of downloaded libconfuse\>/src/.libs'
 
 this will create a binary that dynamically linked with libevent and libconfuse.
 
