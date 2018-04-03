@@ -89,7 +89,7 @@ void sb_connection_del(struct sb_connection * conn) {
     struct sb_config * config = app->config;
 
     if (config->app_mode == SB_CLIENT) {
-        for(int i = config->rt_cnt; i > 0; i--) {
+        for(int i = config->rt_cnt; i > 0; i--, config->rt_cnt--) {
             struct sb_rt * rt = &config->rt[i - 1];
             log_debug("remove routing for %s", sb_util_human_addr(AF_INET, &rt->dst));
             sb_modify_route(SB_RT_OP_DEL, &rt->dst, &rt->mask, &conn->peer_vpn_addr);
@@ -157,13 +157,15 @@ void sb_connection_del(struct sb_connection * conn) {
 
 void sb_connection_set_vpn_peer(struct sb_connection * conn, struct in_addr peer_vpn_addr) {
     conn->peer_vpn_addr = peer_vpn_addr;
+    static char peer_vpn_addr_buf[INET6_ADDRSTRLEN];
+    strncpy(peer_vpn_addr_buf, sb_util_human_addr(AF_INET, &conn->peer_vpn_addr), sizeof(peer_vpn_addr));
     snprintf(conn->desc,
             SB_CONN_DESC_MAX,
             "%s[%s(%s)]",
             (conn->app->config->net_mode == SB_NET_MODE_TCP ? "TCP" : "UDP"),
             sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr),
-            sb_util_human_addr(AF_INET, &conn->peer_vpn_addr));
-    log_info("peer vpn address is set to %s", sb_util_human_addr(AF_INET, &peer_vpn_addr));
+            peer_vpn_addr_buf);
+    log_info("peer vpn address is set to %s", peer_vpn_addr_buf);
 }
 
 void sb_connection_say_bye(struct sb_connection * conn) {
