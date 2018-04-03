@@ -41,6 +41,7 @@ struct sb_config * sb_config_read(const char * config_file) {
             CFG_STR("log", SB_DEFAULT_LOG_LEVEL, CFGF_NONE),
             CFG_STR("logfile", SB_DEFAULT_LOG_PATH, CFGF_NONE),
             CFG_STR("routefile", "", CFGF_NONE),
+            CFG_STR("pidfile", SB_DEFAULT_PID_FILE, CFGF_NONE),
             CFG_END()
 
         };
@@ -183,6 +184,10 @@ struct sb_config * sb_config_read(const char * config_file) {
         if (config->app_mode == SB_SERVER && strlen(config->routefile) != 0) {
             sb_parse_rt_file(config);
         }
+
+        strncpy(config->pidfile, cfg_getstr(cfg, "pidfile"), sizeof(config->pidfile));
+        log_debug("pid file is set to [%s]", config->pidfile);
+
     } while(0);
 
     if (cfg) {
@@ -219,6 +224,7 @@ int sb_config_apply(struct sb_app * app, struct sb_config * config) {
         return -1;
     }
     if (sb_logger.fp && fileno(sb_logger.fp) != fileno(newfp)) {
+        log_info("log will go to %s, see you there", config->logfile);
         fclose(sb_logger.fp);
         sb_logger.fp = 0;
     }

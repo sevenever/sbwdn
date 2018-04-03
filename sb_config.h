@@ -18,6 +18,8 @@ enum SB_APP_MODE { SB_SERVER, SB_CLIENT };
 #define SB_DEFAULT_NET_MTU 1400
 #define SB_DEFAULT_LOG_LEVEL "info"
 #define SB_DEFAULT_LOG_PATH "/var/log/sbwdn.log"
+#define SB_DEFAULT_PID_FILE "/var/run/sbwdn.pid"
+
 
 struct sb_rt {
     struct in_addr dst;
@@ -39,6 +41,7 @@ struct sb_config {
     enum sb_log_lvl log;
     char logfile[PATH_MAX];
     char routefile[PATH_MAX];
+    char pidfile[PATH_MAX];
 
     unsigned int rt_cnt;
     struct sb_rt rt[SB_RT_MAX];

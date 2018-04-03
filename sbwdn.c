@@ -346,11 +346,11 @@ int main(int argc, char ** argv) {
 
     {
         /* write pid file */
-        FILE * pidf = fopen(SB_PID_FILE, "w");
+        FILE * pidf = fopen(config->pidfile, "w");
         if (!pidf) {
-            log_error("failed to open pid file %s", SB_PID_FILE);
+            log_error("failed to open pid file %s", config->pidfile);
         } else {
-            log_info("written pid %d to %s", getpid(), SB_PID_FILE);
+            log_info("written pid %d to %s", getpid(), config->pidfile);
             fprintf(pidf, "%d", getpid());
             fclose(pidf);
             pidf = 0;
