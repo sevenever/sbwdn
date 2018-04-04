@@ -10,6 +10,8 @@
 #include <stdbool.h>
 #include <netdb.h>
 #include <signal.h>
+#include <syslog.h>
+#include <sys/stat.h>
 
 #include "sb_log.h"
 #include "sb_config.h"
@@ -24,15 +26,15 @@ static void libevent_log(int severity, const char *msg) {
     int lvl;
     switch (severity) {
         case EVENT_LOG_DEBUG:
-            lvl = LOG_DEBUG; break;
+            lvl = SB_LOG_DEBUG; break;
         case EVENT_LOG_MSG:
-            lvl = LOG_INFO;  break;
+            lvl = SB_LOG_INFO;  break;
         case EVENT_LOG_WARN:
-            lvl = LOG_WARN;  break;
+            lvl = SB_LOG_WARN;  break;
         case EVENT_LOG_ERR:
-            lvl = LOG_ERROR; break;
+            lvl = SB_LOG_ERROR; break;
         default:
-            lvl = LOG_INFO;  break;
+            lvl = SB_LOG_INFO;  break;
     }
     if (lvl >= sb_logger.lvl) {
         log_log(lvl, __FILE__, __LINE__, "libevent: %s", msg);
@@ -304,27 +306,70 @@ void sb_sigint_handler(evutil_socket_t sig, short what, void * data) {
     sb_stop_app((struct sb_app *)data, 0);
 }
 
+int sb_daemonize() {
+    int pid;
+
+    pid = fork();
+    if (pid < 0) {
+        log_error("failed 1st fork: %s", sb_util_strerror(errno));
+        return -1;
+    } else if (pid > 0) {
+        exit(0);
+        /* will not reach here */
+        return 0;
+    }
+    pid = fork();
+    if (pid < 0) {
+        log_error("failed 2nd fork: %s", sb_util_strerror(errno));
+        /* we don't return -1 here, b/c we will not open tty, fail this fork doesn't matter */
+    } else if (pid > 0) {
+        exit(0);
+        /* will not reach here */
+        return 0;
+    }
+
+    setsid();
+
+    if (chdir("/") < 0) {
+        log_error("failed to chdir to /, %s", sb_util_strerror(errno));
+    }
+
+    umask(0);
+
+    closelog();
+    /* close c runtime stdios, otherwise it will ruin memory 
+     * when closing the underlying fds.
+     * I am looking at you, uclibc
+     */
+    fclose(stdin);
+    fclose(stdout);
+    fclose(stderr);
+    log_set_fp(0);
+    log_set_quiet(1);
+    for (int fd = sysconf(_SC_OPEN_MAX); fd>=0; fd--)
+    {
+        close(fd);
+    }
+    /* log to syslog before log file is open */
+    openlog("sbwdn", LOG_PID, LOG_DAEMON);
+
+    return 0;
+}
+
 int main(int argc, char ** argv) {
+    /* init logger */
+    log_init(&sb_logger);
+    /* set fp to NULL, so that logs goes to syslog before log file is open */
+    openlog("sbwdn", LOG_PID, LOG_DAEMON);
+
     if (argc != 3 || strlen(argv[1]) != 2 || strncmp(argv[1], "-f", 2) != 0) {
-        dprintf(STDERR_FILENO, "Usage: %s -f [config file path]\n", argv[0]);
+        log_error("Usage: %s -f [config file path]\n", argv[0]);
         return 1;
     }
 
     if (geteuid() != 0) {
         log_fatal("only root can run, exiting");
         return 1;
-    }
-
-    /* default log level */
-    sb_logger.lvl = LOG_INFO;
-    sb_logger.fp = fopen(SB_DEFAULT_LOG_PATH, "ae");
-    if (!sb_logger.fp) {
-        log_fatal("failed to open default log file %s", SB_DEFAULT_LOG_PATH);
-        return 1;
-    }
-    if (setvbuf(sb_logger.fp, 0, _IOLBF, 0) != 0) {
-        log_error("failed to set default log file as line bufferred %s", SB_DEFAULT_LOG_PATH);
-        return -1;
     }
 
     /* read config file before daemonize, since the path could be a relative path */
@@ -335,13 +380,14 @@ int main(int argc, char ** argv) {
         log_fatal("failed to read config file %s", config_file);
         return 0;
     }
+
 #ifndef SB_DEBUG
     log_info("mutating to a daemon, a happy daemon");
-    if (daemon(0, 0) < 0) {
-        log_fatal("failed to mutate to a daemon, are you oric?");
+    if (sb_daemonize() < 0) {
+        log_fatal("failed to mutate to a daemon: %s, are you oric?", sb_util_strerror(errno));
         return 1;
     }
-    log_info("hello, I am a daemon");
+    log_info("hello, I am now a daemon");
 #endif
 
     {
@@ -350,7 +396,7 @@ int main(int argc, char ** argv) {
         if (!pidf) {
             log_error("failed to open pid file %s", config->pidfile);
         } else {
-            log_info("written pid %d to %s", getpid(), config->pidfile);
+            log_info("writing pid %d to %s", getpid(), config->pidfile);
             fprintf(pidf, "%d", getpid());
             fclose(pidf);
             pidf = 0;

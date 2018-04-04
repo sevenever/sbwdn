@@ -63,4 +63,5 @@ void sb_sigterm_handler(evutil_socket_t sig, short what, void * data);
 
 void sb_sigint_handler(evutil_socket_t sig, short what, void * data);
 
+int sb_daemonize();
 #endif

@@ -1,7 +1,7 @@
 TARGET = sbwdn
 LIBS = -levent -lconfuse
 CC = gcc
-override CFLAGS += $(DEBUGFLAG) -Wall -Wextra -Wno-address-of-packed-member
+override CFLAGS += --std=gnu99 $(DEBUGFLAG) -Wall -Wextra -Wno-address-of-packed-member
 override LFLAGS += $(DEBUGFLAG) -Wall -Wextra
 
 .PHONY: default all clean

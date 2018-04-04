@@ -155,24 +155,24 @@ struct sb_config * sb_config_read(const char * config_file) {
 
         char * log_str = cfg_getstr(cfg, "log");
         if (strcmp(log_str, "trace") == 0) {
-            config->log = LOG_TRACE;
+            config->log = SB_LOG_TRACE;
         } else if (strcmp(log_str, "debug") == 0) {
-            config->log = LOG_DEBUG;
+            config->log = SB_LOG_DEBUG;
         } else if (strcmp(log_str, "info") == 0) {
-            config->log = LOG_INFO;
+            config->log = SB_LOG_INFO;
         } else if (strcmp(log_str, "warn") == 0) {
-            config->log = LOG_WARN;
+            config->log = SB_LOG_WARN;
         } else if (strcmp(log_str, "error") == 0) {
-            config->log = LOG_ERROR;
+            config->log = SB_LOG_ERROR;
         } else if (strcmp(log_str, "fatal") == 0) {
-            config->log = LOG_FATAL;
+            config->log = SB_LOG_FATAL;
         } else if (strcmp(log_str, "all") == 0) {
-            config->log = LOG_FATAL;
+            config->log = SB_LOG_FATAL;
         } else {
             log_warn("unkown log level %s, will default to info", log_str);
-            config->log = LOG_INFO;
+            config->log = SB_LOG_INFO;
         }
-        log_debug("log level is set to %s", config->log == LOG_INFO ? "info" : log_str);
+        log_debug("log level is set to %s", config->log == SB_LOG_INFO ? "info" : log_str);
 
         strncpy(config->logfile, cfg_getstr(cfg, "logfile"), sizeof(config->logfile));
         log_debug("log file is set to [%s]", config->logfile);
@@ -214,6 +214,7 @@ int sb_config_apply(struct sb_app * app, struct sb_config * config) {
 
     log_set_lvl(config->log);
 
+    log_debug("openning log file %s", config->logfile);
     FILE * newfp = fopen(config->logfile, "ae");
     if (!newfp) {
         log_fatal("failed to open log file %s", config->logfile);
