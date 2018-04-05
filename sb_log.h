@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#define SB_SYSLOG_MAX 1024
+#define SB_SYSLOG_FMT_MAX 512
 
 extern struct SB_LOGGER{
   FILE *fp;

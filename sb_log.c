@@ -74,11 +74,9 @@ void log_log(int l, const char *file, int line, const char * func, const char *f
         }
 
         va_start(args, fmt);
-        static char fmtbuf[SB_SYSLOG_MAX];
-        static char logbuf[SB_SYSLOG_MAX];
+        static char fmtbuf[SB_SYSLOG_FMT_MAX];
         snprintf(fmtbuf, sizeof(fmtbuf), "%-5s %s:%d:%s: %s", lvl[l], file, line, func, fmt);
-        vsnprintf(logbuf, sizeof(logbuf), fmtbuf, args);
-        syslog(prio, "%s", logbuf);
+        vsyslog(prio, fmtbuf, args);
         va_end(args);
     }
 }
