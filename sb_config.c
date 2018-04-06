@@ -42,6 +42,8 @@ struct sb_config * sb_config_read(const char * config_file) {
             CFG_STR("logfile", SB_DEFAULT_LOG_PATH, CFGF_NONE),
             CFG_STR("routefile", "", CFGF_NONE),
             CFG_STR("pidfile", SB_DEFAULT_PID_FILE, CFGF_NONE),
+            CFG_STR("if_up_script", "", CFGF_NONE),
+            CFG_STR("if_down_script", "", CFGF_NONE),
             CFG_END()
 
         };
@@ -187,6 +189,12 @@ struct sb_config * sb_config_read(const char * config_file) {
 
         strncpy(config->pidfile, cfg_getstr(cfg, "pidfile"), sizeof(config->pidfile));
         log_debug("pid file is set to [%s]", config->pidfile);
+
+        strncpy(config->if_up_script, cfg_getstr(cfg, "if_up_script"), sizeof(config->if_up_script));
+        log_debug("if_up_script is set to [%s]", config->if_up_script);
+
+        strncpy(config->if_down_script, cfg_getstr(cfg, "if_down_script"), sizeof(config->if_down_script));
+        log_debug("if_down_script is set to [%s]", config->if_down_script);
 
     } while(0);
 

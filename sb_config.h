@@ -11,6 +11,9 @@
 
 #define SB_RT_MAX 1024
 
+/* max length of if_up_script and if_down_script */
+#define SB_CMD_MAX 1024
+
 enum SB_APP_MODE { SB_SERVER, SB_CLIENT };
 
 #define SB_DEFAULT_NET_MODE "udp"
@@ -42,6 +45,8 @@ struct sb_config {
     char logfile[PATH_MAX];
     char routefile[PATH_MAX];
     char pidfile[PATH_MAX];
+    char if_up_script[PATH_MAX];
+    char if_down_script[PATH_MAX];
 
     unsigned int rt_cnt;
     struct sb_rt rt[SB_RT_MAX];

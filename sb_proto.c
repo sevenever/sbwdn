@@ -374,6 +374,41 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
     return queued;
 }
 
+int sb_conn_state_change_hook(struct sb_connection * conn, int newstate) {
+    struct sb_app * app = conn->app;
+    struct sb_config * config = app->config;
+    int ret;
+    char cmd[SB_CMD_MAX];
+    char vpn_addr[INET6_ADDRSTRLEN];
+    char peer_vpn_addr[INET6_ADDRSTRLEN];
+    char peer_addr[INET6_ADDRSTRLEN];
+
+    if (newstate == ESTABLISHED_2 && strlen(config->if_up_script) > 0) {
+        strncpy(vpn_addr, sb_util_human_addr(AF_INET, &conn->vpn_addr), sizeof(vpn_addr));
+        strncpy(peer_vpn_addr, sb_util_human_addr(AF_INET, &conn->peer_vpn_addr), sizeof(peer_vpn_addr));
+        strncpy(peer_addr, sb_util_human_addr(AF_INET, &conn->peer_addr), sizeof(peer_addr));
+        snprintf(cmd, sizeof(cmd), "%s %s %s %s %s %d %d ", config->if_up_script, app->tunname, vpn_addr, peer_vpn_addr, peer_addr, conn->net_mode, newstate);
+        log_info("executing if_up_script: %s", cmd);
+        ret = system(cmd);
+        if (ret != 0) {
+            log_error("failed to execute if_up_script: %s, ret is %d, error is %s", cmd, ret, sb_util_strerror(errno));
+        }
+    } else if (newstate == TERMINATED_4 && strlen(config->if_down_script) > 0) {
+        strncpy(vpn_addr, sb_util_human_addr(AF_INET, &conn->vpn_addr), sizeof(vpn_addr));
+        strncpy(peer_vpn_addr, sb_util_human_addr(AF_INET, &conn->peer_vpn_addr), sizeof(peer_vpn_addr));
+        strncpy(peer_addr, sb_util_human_addr(AF_INET, &conn->peer_addr), sizeof(peer_addr));
+        snprintf(cmd, sizeof(cmd), "%s %s %s %s %s %d %d ", config->if_down_script, app->tunname, vpn_addr, peer_vpn_addr, peer_addr, conn->net_mode, newstate);
+        log_info("executing if_down_script: %s", cmd);
+        ret = system(cmd);
+        if (ret != 0) {
+            log_error("failed to execute if_down_script: %s, ret is %d, error is %s", cmd, ret, sb_util_strerror(errno));
+        }
+
+    }
+
+    return 0;
+}
+
 void sb_do_conn_timeout(evutil_socket_t fd, short what, void * data) {
     SB_NOT_USED(fd);
     SB_NOT_USED(what);

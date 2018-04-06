@@ -59,6 +59,7 @@ void sb_conn_set_timeout(struct sb_connection * conn, int newstate);
     do { \
         if (conn->net_state != newstate) { \
             log_info("connection net_state changing from %d to %d: %s", conn->net_state, newstate, conn->desc); \
+            sb_conn_state_change_hook(conn, newstate); \
         } \
         conn->net_state = newstate; \
         if (conn->net_state == TERMINATED_4) { \
@@ -70,6 +71,8 @@ void sb_conn_set_timeout(struct sb_connection * conn, int newstate);
             sb_conn_set_timeout(conn, newstate); \
         } \
     } while(0);
+
+int sb_conn_state_change_hook(struct sb_connection * conn, int newstate);
 
 void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg);
 
