@@ -1,0 +1,13 @@
+#!/bin/bash
+
+PEER_VPN_ADDR=$3
+DEFAULT_RT=$(/sbin/ip route | awk '/default/ { print $3 }')
+SERVER_IP=$4
+ip route add ${SERVER_IP} via ${DEFAULT_RT}
+ip route add default via $PEER_VPN_ADDR
+
+# use 8.8.8.8
+cat /etc/default/dnsmasq | grep -v 'RESOLV_CONF=/home/pi/sbwdn' > /var/run/sbwdn.dnsmasq.default
+cat /var/run/sbwdn.dnsmasq.default > /etc/default/dnsmasq
+echo 'RESOLV_CONF=/home/pi/sbwdn/resolv.conf' >> /etc/default/dnsmasq
+/etc/init.d/dnsmasq restart &
