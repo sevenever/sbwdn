@@ -272,9 +272,6 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 sb_connection_set_vpn_peer(conn, cookie->server_vpn_addr);
                 memcpy(conn->cookie, cookie->cookie, SB_COOKIE_SIZE);
 
-                /* save server vpn addr, will use when setting route */
-                conn->vpn_addr = cookie->server_vpn_addr;
-
                 log_info("configuring IP of tun device addr to %s", sb_util_human_addr(AF_INET, &cookie->client_vpn_addr));
                 log_info("configuring netmask of tun device addr to %s", sb_util_human_addr(AF_INET, &cookie->netmask));
                 if(sb_config_tun_addr(app->tunname, &cookie->client_vpn_addr, &cookie->netmask, app->config->mtu) < 0) {
@@ -282,6 +279,10 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                     sb_connection_change_net_state(conn, TERMINATED_4);
                     break;
                 }
+
+                /* save server vpn addr, will use when setting route */
+                conn->vpn_addr = cookie->client_vpn_addr;
+
                 /* send back to server*/
                 TAILQ_INSERT_TAIL(&(conn->packages_t2n), pkg, entries);
                 queued = 1;
@@ -386,8 +387,16 @@ int sb_conn_state_change_hook(struct sb_connection * conn, int newstate) {
     if (newstate == ESTABLISHED_2 && strlen(config->if_up_script) > 0) {
         strncpy(vpn_addr, sb_util_human_addr(AF_INET, &conn->vpn_addr), sizeof(vpn_addr));
         strncpy(peer_vpn_addr, sb_util_human_addr(AF_INET, &conn->peer_vpn_addr), sizeof(peer_vpn_addr));
-        strncpy(peer_addr, sb_util_human_addr(AF_INET, &conn->peer_addr), sizeof(peer_addr));
-        snprintf(cmd, sizeof(cmd), "%s %s %s %s %s %d %d ", config->if_up_script, app->tunname, vpn_addr, peer_vpn_addr, peer_addr, conn->net_mode, newstate);
+        strncpy(peer_addr, sb_util_human_addr(AF_INET, &((struct sockaddr_in*)&conn->peer_addr)->sin_addr), sizeof(peer_addr));
+        snprintf(cmd, sizeof(cmd), "%s %s %s %s %s %d %d %d ",
+                config->if_up_script,
+                app->tunname,
+                vpn_addr,
+                peer_vpn_addr,
+                peer_addr,
+                ntohs(conn->peer_addr.sin_port),
+                conn->net_mode,
+                newstate);
         log_info("executing if_up_script: %s", cmd);
         ret = system(cmd);
         if (ret != 0) {
@@ -396,8 +405,16 @@ int sb_conn_state_change_hook(struct sb_connection * conn, int newstate) {
     } else if (newstate == TERMINATED_4 && strlen(config->if_down_script) > 0) {
         strncpy(vpn_addr, sb_util_human_addr(AF_INET, &conn->vpn_addr), sizeof(vpn_addr));
         strncpy(peer_vpn_addr, sb_util_human_addr(AF_INET, &conn->peer_vpn_addr), sizeof(peer_vpn_addr));
-        strncpy(peer_addr, sb_util_human_addr(AF_INET, &conn->peer_addr), sizeof(peer_addr));
-        snprintf(cmd, sizeof(cmd), "%s %s %s %s %s %d %d ", config->if_down_script, app->tunname, vpn_addr, peer_vpn_addr, peer_addr, conn->net_mode, newstate);
+        strncpy(peer_addr, sb_util_human_addr(AF_INET, &((struct sockaddr_in*)&conn->peer_addr)->sin_addr), sizeof(peer_addr));
+        snprintf(cmd, sizeof(cmd), "%s %s %s %s %s %d %d %d ",
+                config->if_down_script,
+                app->tunname,
+                vpn_addr,
+                peer_vpn_addr,
+                peer_addr,
+                ntohs(conn->peer_addr.sin_port),
+                conn->net_mode,
+                newstate);
         log_info("executing if_down_script: %s", cmd);
         ret = system(cmd);
         if (ret != 0) {
@@ -506,7 +523,7 @@ void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) 
     for (int i = 0; i < n; i++, rt++) {
         if (config->rt_cnt < SB_RT_MAX) {
             log_trace("adding routing for %s %s", sb_util_human_addr(AF_INET, &rt->dst), conn->desc);
-            if (sb_modify_route(SB_RT_OP_ADD, &rt->dst, &rt->mask, &conn->vpn_addr) == 0) {
+            if (sb_modify_route(SB_RT_OP_ADD, &rt->dst, &rt->mask, &conn->peer_vpn_addr) == 0) {
                 /* save, delete when disconnect */
                 config->rt[config->rt_cnt++] = *rt;
             }
