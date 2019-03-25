@@ -256,19 +256,26 @@ int sb_parse_rt_file(struct sb_config * config) {
     struct sb_rt rt;
 
     while(1) {
+        if (i >= SB_RT_MAX) {
+            break;
+        }
         line = 0;
         len = 0;
-        if ((read = getline(&line, &len, f)) == -1 || i >= SB_RT_MAX) {
+        read = getline(&line, &len, f);
+        if (read == -1) {
+            free(line);
             break;
         }
         if (read <= 1) {
             /* empty line */
+            free(line);
             continue;
         }
         line[read-1] = 0;
         space = strstr(line, " ");
         if (!space) {
             log_error("invalid route config %s", line);
+            free(line);
             continue;
         }
         dst = line;
@@ -280,6 +287,7 @@ int sb_parse_rt_file(struct sb_config * config) {
         } else {
             config->rt[i++] = rt;
         }
+        free(line);
     }
     config->rt_cnt = i;
     log_debug("total route count: %d", config->rt_cnt);
