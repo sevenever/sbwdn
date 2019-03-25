@@ -254,7 +254,13 @@ int sb_parse_rt_file(struct sb_config * config) {
     size_t len;
     ssize_t read;
     struct sb_rt rt;
-    while ((read = getline(&line, &len, f)) != -1 && i < SB_RT_MAX) {
+
+    while(1) {
+        line = 0;
+        len = 0;
+        if ((read = getline(&line, &len, f)) == -1 || i >= SB_RT_MAX) {
+            break;
+        }
         if (read <= 1) {
             /* empty line */
             continue;
