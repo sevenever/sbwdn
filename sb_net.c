@@ -242,7 +242,7 @@ int sb_net_io_buf_write(struct sb_net_io_buf * write_buf, int fd) {
             return 0;
         }
         /* error */
-        log_error("failed to send to net %s", write_buf->conn->desc);
+        log_error("failed to send to net %s, %s", write_buf->conn->desc, sb_util_strerror(errno));
         return -1;
     } else {
         log_trace("written %d bytes to %s", ret, write_buf->conn->desc);
@@ -692,6 +692,8 @@ int sb_modify_route(unsigned int op, struct in_addr * dst, struct in_addr * netm
         }
         if ((ret = ioctl(s, req, &route)) != 0) {
             log_error("failed to use ioctl to modify routing %s", sb_util_strerror(errno));
+            log_error("dst: %s", sb_util_human_addr(AF_INET, dst));
+            log_error("mask: %s", sb_util_human_addr(AF_INET, netmask));
             fail = 1;
             break;
         }

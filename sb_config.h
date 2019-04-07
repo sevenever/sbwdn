@@ -5,7 +5,7 @@
 #include <limits.h>
 
 #include "sb_log.h"
-#include "sbwdn.h"
+#include "sb_net.h"
 
 #define SB_CONFIG_STR_MAX 256
 
@@ -22,12 +22,6 @@ enum SB_APP_MODE { SB_SERVER, SB_CLIENT };
 #define SB_DEFAULT_LOG_LEVEL "info"
 #define SB_DEFAULT_LOG_PATH "/var/log/sbwdn.log"
 #define SB_DEFAULT_PID_FILE "/var/run/sbwdn.pid"
-
-
-struct sb_rt {
-    struct in_addr dst;
-    struct in_addr mask;
-};
 
 struct sb_config {
     /* client or server */
@@ -48,6 +42,8 @@ struct sb_config {
     char if_up_script[PATH_MAX];
     char if_down_script[PATH_MAX];
 
+    char rt_tag[SB_RT_TAG_SIZE];
+    unsigned int rt_total; /* rt_total == rt_cnt on server, rt_cnt == rt_total on client when all route entries are fetched */
     unsigned int rt_cnt;
     struct sb_rt rt[SB_RT_MAX];
 };

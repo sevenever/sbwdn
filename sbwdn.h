@@ -5,7 +5,6 @@
 #include <event2/event.h>
 #include <net/if.h>
 
-#include "sb_config.h"
 #include "sb_net.h"
 
 /* how long we wait for sending bye to peer before exit, in seconds*/
@@ -32,6 +31,7 @@ struct sb_app {
 
     struct event * sigterm_event;
     struct event * sigint_event;
+    struct event * sighup_event;
 
     struct event * tun_readevent;
     struct event * tun_writeevent;

@@ -18,6 +18,7 @@
 #define SB_CONN_DESC_MAX 1024
 
 #define SB_COOKIE_SIZE 8
+#define SB_RT_TAG_SIZE 8
 
 /* how long should we wait before next reconnect, max value*/
 #define SB_CLIENT_RETRY_INTERVAL_MAX 300
@@ -38,6 +39,11 @@ struct iphdr {
     uint32_t    saddr;
     uint32_t    daddr;
     /*The options start here. */
+};
+
+struct sb_rt {
+    struct in_addr dst;
+    struct in_addr mask;
 };
 
 /* ------------------------------------------------------------------------------------------------
@@ -67,6 +73,26 @@ struct __attribute__ ((packed)) sb_cookie_pkg_data {
     struct in_addr server_vpn_addr;
     struct in_addr client_vpn_addr;
     struct in_addr netmask;
+};
+
+struct __attribute__ ((packed)) sb_route_tag_data {
+    char rt_tag[SB_RT_TAG_SIZE];
+    uint32_t rt_total;
+};
+
+struct __attribute__ ((packed)) sb_route_req_data {
+    char rt_tag[SB_RT_TAG_SIZE];
+    uint32_t rt_total;
+    uint32_t offset;
+    uint32_t count;
+};
+
+struct __attribute__ ((packed)) sb_route_resp_data {
+    char rt_tag[SB_RT_TAG_SIZE];
+    uint32_t rt_total;
+    uint32_t offset;
+    uint32_t count;
+    struct sb_rt rt;
 };
 
 /* ------------------------------------------------------------------------------------------------
@@ -173,6 +199,8 @@ struct sb_connection {
 
     struct event * keepalive_timer;
 
+    struct event * route_timer;
+
     enum sb_conn_state net_state;
 
     struct sockaddr_in peer_addr;    /* the address of net peer */
@@ -198,6 +226,10 @@ struct sb_connection {
     struct sb_net_io_buf net_write_io_buf;
 
     char desc[SB_CONN_DESC_MAX];
+
+    /* only used to send tag to client, if we know this client get 
+     * the latest route tag, we set this the same as config->rt_tag */
+    char rt_tag[SB_RT_TAG_SIZE];
     TAILQ_ENTRY(sb_connection) entries;
 };
 
