@@ -7,6 +7,7 @@
 
 #include "sb_log.h"
 #include "sb_util.h"
+#include "sb_config.h"
 #include "sb_proto.h"
 #include "sb_net.h"
 #include "sb_tun.h"
@@ -49,6 +50,8 @@ struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, uns
     conn->timeout_timer = event_new(conn->eventbase, -1, EV_PERSIST, sb_do_conn_timeout, conn);
 
     conn->keepalive_timer = event_new(conn->eventbase, -1, EV_PERSIST, sb_do_conn_send_keepalive, conn);
+
+    conn->route_timer = event_new(conn->eventbase, -1, EV_PERSIST, sb_do_route_timeout, conn);
 
     conn->net_state = NEW_0;
 
@@ -138,6 +141,10 @@ void sb_connection_del(struct sb_connection * conn) {
     event_del(conn->keepalive_timer);
     event_free(conn->keepalive_timer);
     conn->keepalive_timer = 0;
+
+    event_del(conn->route_timer);
+    event_free(conn->route_timer);
+    conn->route_timer = 0;
 
     conn->net_state = TERMINATED_4;
 
@@ -311,7 +318,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
             sb_connection_set_vpn_peer(conn, cookie->client_vpn_addr);
             log_info("vpn peer addr is %s", sb_util_human_addr(AF_INET, &conn->peer_vpn_addr));
             sb_connection_change_net_state(conn, ESTABLISHED_2);
-            sb_send_route_info(conn);
+            sb_try_send_route_tag(app->config, conn);
             break;
         case ESTABLISHED_2:
             if (pkg->type == SB_PKG_TYPE_DATA_2) {
@@ -337,6 +344,33 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
                 /* client */
                 log_warn("received a route package from server %s, adding route", conn->desc);
                 sb_conn_handle_route(conn, pkg);
+                break;
+            } else if (pkg->type == SB_PKG_TYPE_ROUTE_TAG_7) {
+                if (app->config->app_mode == SB_SERVER) {
+                    log_warn("received a route information tag package from client %s, ignoring", conn->desc);
+                    break;
+                }
+                /* client */
+                log_info("received a route information tag package from server %s, refresh route", conn->desc);
+                sb_conn_handle_route_tag(app->config, conn, pkg);
+                break;
+            } else if (pkg->type == SB_PKG_TYPE_ROUTE_REQ_8) {
+                if (app->config->app_mode == SB_CLIENT) {
+                    log_warn("received a route req package from server %s, ignoring", conn->desc);
+                    break;
+                }
+                /* server */
+                log_debug("received a route req package from client %s", conn->desc);
+                sb_conn_handle_route_req(app->config, conn, pkg);
+                break;
+            } else if (pkg->type == SB_PKG_TYPE_ROUTE_RESP_9) {
+                if (app->config->app_mode == SB_SERVER) {
+                    log_warn("received a route resp package from client %s, ignoring", conn->desc);
+                    break;
+                }
+                /* client */
+                log_warn("received a route resp package from server %s", conn->desc);
+                sb_conn_handle_route_resp(app->config, conn, pkg);
                 break;
             } else if (pkg->type == SB_PKG_TYPE_BYE_3) {
                 if (app->config->app_mode == SB_SERVER) {
@@ -396,7 +430,7 @@ int sb_conn_state_change_hook(struct sb_connection * conn, int newstate) {
                 peer_addr,
                 ntohs(conn->peer_addr.sin_port),
                 conn->net_mode,
-                newstate);
+                newstate) < 0 ? abort() : (void) 0; /* to suppress gcc's -Wformat-truncation= */
         log_info("executing if_up_script: %s", cmd);
         ret = system(cmd);
         if (ret != 0) {
@@ -414,7 +448,7 @@ int sb_conn_state_change_hook(struct sb_connection * conn, int newstate) {
                 peer_addr,
                 ntohs(conn->peer_addr.sin_port),
                 conn->net_mode,
-                newstate);
+                newstate) < 0 ? abort() : (void) 0;/* to suppress gcc's -Wformat-truncation= */
         log_info("executing if_down_script: %s", cmd);
         ret = system(cmd);
         if (ret != 0) {
@@ -517,7 +551,13 @@ void sb_conn_handle_route(struct sb_connection * conn, struct sb_package * pkg) 
         log_warn("received a route package from client, ignoring");
         return;
     }
-    log_warn("received a route package from server");
+    log_info("received a route package from server");
+    char all_zero[SB_RT_TAG_SIZE];
+    memset(all_zero, 0, SB_RT_TAG_SIZE);
+    if (memcmp(config->rt_tag, all_zero, SB_RT_TAG_SIZE) != 0) {
+        log_warn("we have received a route tag from server, will drop this old style route package");
+        return;
+    }
     struct sb_rt * rt = (struct sb_rt *)pkg->ipdata;
     int n = pkg->ipdatalen / sizeof(struct sb_rt);
     for (int i = 0; i < n; i++, rt++) {
@@ -565,5 +605,219 @@ int sb_vpn_addr_used(struct sb_app * app, struct in_addr vpn_addr) {
         }
     }
     return 0;
+}
+
+void sb_try_send_route_tag(struct sb_config * config, struct sb_connection * conn) {
+    if (memcmp(config->rt_tag, conn->rt_tag, SB_RT_TAG_SIZE) != 0) {
+        sb_send_route_tag(config, conn);
+        /* setup time-out callback */
+        log_debug("setting a timeout %d seconds for route tag to %s", SB_RT_REQ_TIMEOUT, conn->desc);
+        sb_util_set_timeout(conn->route_timer, SB_RT_REQ_TIMEOUT);
+    } else {
+        sb_util_clear_timeout(conn->route_timer);
+    }
+}
+
+int sb_send_route_tag(struct sb_config * config, struct sb_connection * conn) {
+    log_warn("sending route tag to %s", conn->desc);
+    struct sb_route_tag_data rt_tag_data;
+    memcpy(&rt_tag_data.rt_tag, config->rt_tag, SB_RT_TAG_SIZE);
+    rt_tag_data.rt_total = htonl(config->rt_total);
+    struct sb_package * rt_tag_pkg = sb_package_new(SB_PKG_TYPE_ROUTE_TAG_7, &rt_tag_data, sizeof(struct sb_route_tag_data));
+    if (!rt_tag_pkg) {
+        log_error("failed to create a route tag package");
+        return -1;
+    }
+    log_info("sending a route tag of %u entries to %s", ntohl(rt_tag_data.rt_total), conn->desc);
+    TAILQ_INSERT_TAIL(&(conn->packages_t2n), rt_tag_pkg, entries);
+    conn->t2n_pkg_count++;
+
+    return 0;
+}
+
+int sb_conn_handle_route_tag(struct sb_config * config, struct sb_connection * conn, struct sb_package * pkg) {
+    struct sb_route_tag_data * tag_data = (struct sb_route_tag_data *)pkg->ipdata;
+    tag_data->rt_total = ntohl(tag_data->rt_total);
+    /* if tag is the same as we have, ignore it */
+    if (memcmp(config->rt_tag, tag_data->rt_tag, SB_RT_TAG_SIZE) == 0) {
+        log_warn("received a tag which we already have from %s", conn->desc);
+        return 0;
+    }
+
+    log_info("received a tag pkg with rt_total %u from %s", tag_data->rt_total, conn->desc);
+
+    /* remove old route info */
+    for(int i = config->rt_cnt; i > 0; i--, config->rt_cnt--) {
+        struct sb_rt * rt = &config->rt[i - 1];
+        log_debug("remove routing for %s", sb_util_human_addr(AF_INET, &rt->dst));
+        sb_modify_route(SB_RT_OP_DEL, &rt->dst, &rt->mask, &conn->peer_vpn_addr);
+    }
+    /* otherwise save the tag and rt_total */
+    memcpy(config->rt_tag, tag_data->rt_tag, SB_RT_TAG_SIZE);
+    config->rt_total = tag_data->rt_total;
+
+    /* initiate route req for this new tag */
+    sb_try_send_route_req(config, conn);
+
+    return 0;
+}
+
+void sb_try_send_route_req(struct sb_config * config, struct sb_connection * conn) {
+    if (config->rt_total > config->rt_cnt) {
+        sb_send_route_req(config, conn);
+        /* setup time-out callback */
+        log_debug("setting a timeout %d seconds for route req to %s", SB_RT_REQ_TIMEOUT, conn->desc);
+        sb_util_set_timeout(conn->route_timer, SB_RT_REQ_TIMEOUT);
+    } else {
+        sb_util_clear_timeout(conn->route_timer);
+    }
+}
+
+int sb_send_route_req(struct sb_config * config, struct sb_connection * conn) {
+    struct sb_route_req_data req;
+    memcpy(req.rt_tag, config->rt_tag, SB_RT_TAG_SIZE);
+    req.rt_total = htonl(config->rt_total);
+    req.offset = htonl(config->rt_cnt);
+    req.count = htonl(SB_RT_COUNT_PER_REQ);
+    struct sb_package * rt_req_pkg = sb_package_new(SB_PKG_TYPE_ROUTE_REQ_8, &req, sizeof(struct sb_route_req_data));
+    if (!rt_req_pkg) {
+        log_error("failed to create a route req package");
+        return -1;
+    }
+    log_info("sending a route req of %u entries with offset of %u to %s", ntohl(req.count), ntohl(req.offset), conn->desc);
+    TAILQ_INSERT_TAIL(&(conn->packages_t2n), rt_req_pkg, entries);
+    conn->t2n_pkg_count++;
+
+    return 0;
+}
+
+int sb_conn_handle_route_req(struct sb_config * config, struct sb_connection * conn, struct sb_package * pkg) {
+    struct sb_route_req_data * req = (struct sb_route_req_data *)pkg->ipdata;
+    req->rt_total = ntohl(req->rt_total);
+    req->offset = ntohl(req->offset);
+    req->count = ntohl(req->count);
+    log_info("received route req (rt_total: %u, offset: %u, count: %u) from %s.", req->rt_total, req->offset, req->count, conn->desc);
+    /* sanity check */
+    if (memcmp(config->rt_tag, req->rt_tag, SB_RT_TAG_SIZE) != 0) {
+        log_warn("received a mismatch route tag from %s", conn->desc);
+        return -1;
+    }
+    if (config->rt_total != req->rt_total) {
+        log_warn("received a mismatch rt_total from %s", conn->desc);
+        return -1;
+    }
+    if (req->offset >= config->rt_total) {
+        log_warn("received a invalid req offset from %s", conn->desc);
+        return -1;
+    }
+    if (req->count == 0) {
+        log_warn("received a zero req count from %s", conn->desc);
+        return -1;
+    }
+    /* now we know this client has latest route tag */
+    memcpy(conn->rt_tag, req->rt_tag, SB_RT_TAG_SIZE);
+    sb_util_clear_timeout(conn->route_timer);
+
+    /* send resp */
+    uint32_t count = req->count;
+    if (req->offset + count > config->rt_total) {
+        count = config->rt_total - req->offset;
+        log_info("number of route entries in resp is limited by rt_total to %u for %s", count, conn->desc);
+    }
+    unsigned int mtu = config->mtu;
+    unsigned int max_len = (mtu + sizeof(struct sb_tun_pi) - SB_RT_TAG_SIZE - 3 /* rt_total, offset, count */ * sizeof(uint32_t));
+    if (count * sizeof(struct sb_rt) > max_len) {
+        count = max_len / sizeof(struct sb_rt);
+        log_info("number of route entries in resp is limited by mtu to %u for %s", count, conn->desc);
+    }
+
+    unsigned int pkglen = sizeof(struct sb_route_resp_data) + (count - 1/* sb_route_resp_data already has one instance of sb_rt */) * sizeof(struct sb_rt);
+    struct sb_route_resp_data * resp = malloc(pkglen);
+    if (!resp) {
+        log_error("failed t allocate memory for resp");
+        return -1;
+    }
+    memcpy(resp->rt_tag, config->rt_tag, SB_RT_TAG_SIZE);
+    resp->rt_total = htonl(config->rt_total);
+    resp->offset = htonl(req->offset);
+    resp->count = htonl(count);
+    memcpy(&(resp->rt), &(config->rt[req->offset]), count * sizeof(struct sb_rt));
+
+    log_info("sending %d routing info to client %s", count, conn->desc);
+    struct sb_package * resp_pkg = sb_package_new(SB_PKG_TYPE_ROUTE_RESP_9, resp, pkglen);
+    if (!resp_pkg) {
+        log_error("failed to create a route resp package");
+        return -1;
+    }
+    TAILQ_INSERT_TAIL(&(conn->packages_t2n), resp_pkg, entries);
+    conn->t2n_pkg_count++;
+
+    return 0;
+}
+
+int sb_conn_handle_route_resp(struct sb_config * config, struct sb_connection * conn, struct sb_package * pkg) {
+    struct sb_route_resp_data * resp = (struct sb_route_resp_data *)pkg->ipdata;
+    resp->rt_total = ntohl(resp->rt_total);
+    resp->offset = ntohl(resp->offset);
+    resp->count = ntohl(resp->count);
+    log_info("received route resp (rt_total: %u, offset: %u, count: %u) from %s.", resp->rt_total, resp->offset, resp->count, conn->desc);
+    /* sanity check */
+    if (memcmp(config->rt_tag, resp->rt_tag, SB_RT_TAG_SIZE) != 0) {
+        log_warn("received a mismatch route tag from %s", conn->desc);
+        return -1;
+    }
+    if (config->rt_total != resp->rt_total) {
+        log_warn("received a mismatch rt_total from %s", conn->desc);
+        return -1;
+    }
+    if (resp->offset >= config->rt_total) {
+        log_warn("received a invalid resp offset(> config->rt_total) from %s", conn->desc);
+        return -1;
+    }
+    if (resp->offset != config->rt_cnt) {
+        log_warn("received a invalid resp offset(!= config->rt_cnt) from %s", conn->desc);
+        return -1;
+    }
+    if (resp->count == 0) {
+        log_warn("received a zero resp count from %s", conn->desc);
+        return -1;
+    }
+    if ((sizeof(struct sb_route_resp_data) + (resp->count - 1) * sizeof(struct sb_rt)) > pkg->ipdatalen) {
+        log_warn("received a invalid resp count %u, ipdatalen is %u, from %s", resp->count, pkg->ipdatalen, conn->desc);
+        return -1;
+
+    }
+
+    struct sb_rt * rt = (struct sb_rt *)&(resp->rt);
+    for (unsigned int i = 0; i < resp->count; i++, rt++) {
+        if (config->rt_cnt < SB_RT_MAX) {
+            log_trace("adding routing for %s %s", sb_util_human_addr(AF_INET, &rt->dst), conn->desc);
+            sb_modify_route(SB_RT_OP_ADD, &rt->dst, &rt->mask, &conn->peer_vpn_addr);
+            /* save, delete when disconnect */
+            config->rt[config->rt_cnt++] = *rt;
+            log_trace("added routing for %s %s", sb_util_human_addr(AF_INET, &rt->dst), conn->desc);
+        } else {
+            log_warn("max route info reached, ignoring %s %s", sb_util_human_addr(AF_INET, &rt->dst), conn->desc);
+        }
+    }
+
+    sb_try_send_route_req(config, conn);
+
+    return 0;
+}
+
+void sb_do_route_timeout(evutil_socket_t fd, short what, void * data) {
+    SB_NOT_USED(fd);
+    SB_NOT_USED(what);
+    struct sb_connection * conn = (struct sb_connection *) data;
+    struct sb_config * config = conn->app->config;
+
+    log_info("route timeout");
+    if (config->app_mode == SB_CLIENT) {
+        sb_try_send_route_req(config, conn);
+    } else {
+        /* server */
+        sb_try_send_route_tag(config, conn);
+    }
 }
 

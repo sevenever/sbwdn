@@ -17,9 +17,15 @@
 #define SB_PKG_TYPE_COOKIE_4 4
 #define SB_PKG_TYPE_ROUTE_5 5
 #define SB_PKG_TYPE_KEEPALIVE_6 6
+#define SB_PKG_TYPE_ROUTE_TAG_7 7
+#define SB_PKG_TYPE_ROUTE_REQ_8 8
+#define SB_PKG_TYPE_ROUTE_RESP_9 9
 
 #define SB_DUMMY_PKG_DATA "SB"
 #define SB_DUMMY_PKG_DATA_LEN 2
+
+#define SB_RT_COUNT_PER_REQ 128
+#define SB_RT_REQ_TIMEOUT 5
 
 /* this represent an IP package */
 struct sb_package {
@@ -90,4 +96,26 @@ struct in_addr sb_find_a_addr_lease(struct sb_app * app);
  */
 int sb_vpn_addr_used(struct sb_app * app, struct in_addr vpn_addr);
 
+void sb_try_send_route_tag(struct sb_config * config, struct sb_connection * conn);
+
+/*
+ * send a route tag package
+ */
+int sb_send_route_tag(struct sb_config * config, struct sb_connection * conn);
+
+
+/*
+ *
+ */
+int sb_conn_handle_route_tag(struct sb_config * config, struct sb_connection * conn, struct sb_package * pkg);
+
+void sb_try_send_route_req(struct sb_config * config, struct sb_connection * conn);
+
+int sb_send_route_req(struct sb_config * config, struct sb_connection * conn);
+
+void sb_do_route_timeout(evutil_socket_t fd, short what, void * data);
+
+int sb_conn_handle_route_req(struct sb_config * config, struct sb_connection * conn, struct sb_package * pkg);
+
+int sb_conn_handle_route_resp(struct sb_config * config, struct sb_connection * conn, struct sb_package * pkg);
 #endif

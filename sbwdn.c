@@ -182,6 +182,7 @@ struct sb_app * sb_app_new() {
 
     app->sigterm_event = 0;
     app->sigint_event = 0;
+    app->sighup_event = 0;
 
     app->tun_readevent = 0;
     app->tun_writeevent = 0;
@@ -253,6 +254,11 @@ void sb_app_del(struct sb_app * app) {
         event_free(app->sigint_event);
         app->sigint_event = 0;
     }
+    if (app->sighup_event) {
+        event_del(app->sighup_event);
+        event_free(app->sighup_event);
+        app->sighup_event = 0;
+    }
 
     app->eventbase = 0;
 
@@ -304,6 +310,32 @@ void sb_sigint_handler(evutil_socket_t sig, short what, void * data) {
     SB_NOT_USED(what);
     log_info("SIGINT received");
     sb_stop_app((struct sb_app *)data, 0);
+}
+
+void sb_sighup_handler(evutil_socket_t sig, short what, void * data) {
+    SB_NOT_USED(sig);
+    SB_NOT_USED(what);
+    log_info("SIGHUP received");
+    struct sb_app * app = data;
+    struct sb_config * config = app->config;
+    /* if any error just ignore */
+    if (config->app_mode == SB_SERVER && strlen(config->routefile) != 0) {
+        log_info("reloading route file %s", config->routefile);
+        if (sb_parse_rt_file(config) == 0) {
+            /* broadcast that we have new route info to all clients */
+            struct sb_connection * conn;
+            TAILQ_FOREACH(conn, &(app->conns), entries) {
+                log_debug("sending new route information tag to client %s", conn->desc);
+                sb_try_send_route_tag(config, conn);
+                log_debug("enabling net write for %s", conn->desc);
+                if (conn->net_mode == SB_NET_MODE_TCP && conn->net_writeevent) {
+                    event_add(conn->net_writeevent, 0);
+                } else if (conn->net_mode == SB_NET_MODE_UDP && app->udp_writeevent) {
+                    event_add(app->udp_writeevent, 0);
+                }
+            }
+        }
+    }
 }
 
 int sb_daemonize() {
@@ -441,12 +473,13 @@ int main(int argc, char ** argv) {
     app->eventbase = eventbase;
 
     /* setup signal handlers */
-    /* call sighup_function on a HUP signal */
     log_info("setting up signal handlers");
     app->sigterm_event = evsignal_new(eventbase, SIGTERM, sb_sigterm_handler, app);
     app->sigint_event = evsignal_new(eventbase, SIGINT, sb_sigint_handler, app);
+    app->sighup_event = evsignal_new(eventbase, SIGHUP, sb_sighup_handler, app);
     event_add(app->sigterm_event, 0);
     event_add(app->sigint_event, 0);
+    event_add(app->sighup_event, 0);
 
     log_info("setting up tun device");
     if (strncmp(app->config->dev, "auto", IFNAMSIZ) == 0) {

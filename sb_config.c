@@ -11,6 +11,7 @@
 #include "sb_log.h"
 #include "sb_util.h"
 #include "sb_config.h"
+#include "sbwdn.h"
 
 struct sb_config * sb_config_read(const char * config_file) {
     int failed = 0;
@@ -290,7 +291,11 @@ int sb_parse_rt_file(struct sb_config * config) {
         free(line);
     }
     config->rt_cnt = i;
+    config->rt_total = i;
     log_debug("total route count: %d", config->rt_cnt);
+    if (sb_util_random(config->rt_tag, SB_RT_TAG_SIZE) < 0) {
+        log_warn("failed to generate route information tag");
+    }
 
     fclose(f);
     if (line) {
