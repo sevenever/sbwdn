@@ -21,6 +21,9 @@
 #include "sb_proto.h"
 #include "sbwdn.h"
 
+#ifdef SB_DEBUG
+#include <mcheck.h>
+#endif
 
 static void libevent_log(int severity, const char *msg) {
     int lvl;
@@ -413,7 +416,9 @@ int main(int argc, char ** argv) {
         return 0;
     }
 
-#ifndef SB_DEBUG
+#ifdef SB_DEBUG
+    mtrace();
+#else
     log_info("mutating to a daemon, a happy daemon");
     if (sb_daemonize() < 0) {
         log_fatal("failed to mutate to a daemon: %s, are you oric?", sb_util_strerror(errno));

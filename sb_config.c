@@ -256,27 +256,24 @@ int sb_parse_rt_file(struct sb_config * config) {
     ssize_t read;
     struct sb_rt rt;
 
+    line = NULL;
+    len = 0;
     while(1) {
         if (i >= SB_RT_MAX) {
             break;
         }
-        line = 0;
-        len = 0;
         read = getline(&line, &len, f);
         if (read == -1) {
-            free(line);
             break;
         }
         if (read <= 1) {
             /* empty line */
-            free(line);
             continue;
         }
         line[read-1] = 0;
         space = strstr(line, " ");
         if (!space) {
             log_error("invalid route config %s", line);
-            free(line);
             continue;
         }
         dst = line;
@@ -288,19 +285,18 @@ int sb_parse_rt_file(struct sb_config * config) {
         } else {
             config->rt[i++] = rt;
         }
-        free(line);
     }
+    if (line) {
+        free(line);
+        line = 0;
+    }
+    fclose(f);
+
     config->rt_cnt = i;
     config->rt_total = i;
     log_debug("total route count: %d", config->rt_cnt);
     if (sb_util_random(config->rt_tag, SB_RT_TAG_SIZE) < 0) {
         log_warn("failed to generate route information tag");
-    }
-
-    fclose(f);
-    if (line) {
-        free(line);
-        line = 0;
     }
 
     return 0;
