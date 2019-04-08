@@ -34,8 +34,13 @@ void log_set_quiet(int enable) {
 void log_log(int l, const char *file, int line, const char * func, const char *fmt, ...) {
     /* Log to stderr */
     va_list args;
+    char now_buf[128];
+    time_t now;
+
+    time(&now);
+    strftime( now_buf, sizeof(now_buf), "%y/%m/%d:%H:%M:%S", localtime( &now ) );
     if (!sb_logger.quiet) {
-        fprintf(stderr, "%-5s %s:%d:%s: ", lvl[l], file, line, func);
+        fprintf(stderr, "%s %-5s %s:%d:%s: ", now_buf, lvl[l], file, line, func);
         va_start(args, fmt);
         vfprintf(stderr, fmt, args);
         va_end(args);
@@ -45,7 +50,7 @@ void log_log(int l, const char *file, int line, const char * func, const char *f
     /* Log to file */
     if (sb_logger.fp) {
         va_start(args, fmt);
-        fprintf(sb_logger.fp, "%-5s %s:%d:%s: ", lvl[l], file, line, func);
+        fprintf(sb_logger.fp, "%s %-5s %s:%d:%s: ", now_buf, lvl[l], file, line, func);
         vfprintf(sb_logger.fp, fmt, args);
         fprintf(sb_logger.fp, "\n");
         va_end(args);
