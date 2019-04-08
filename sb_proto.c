@@ -92,6 +92,9 @@ void sb_connection_del(struct sb_connection * conn) {
     struct sb_config * config = app->config;
 
     if (config->app_mode == SB_CLIENT) {
+        /* reset route infomation */
+        memset(config->rt_tag, 0, SB_RT_TAG_SIZE);
+        config->rt_total = 0;
         for(int i = config->rt_cnt; i > 0; i--, config->rt_cnt--) {
             struct sb_rt * rt = &config->rt[i - 1];
             log_debug("remove routing for %s", sb_util_human_addr(AF_INET, &rt->dst));
