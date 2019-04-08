@@ -672,6 +672,7 @@ void sb_try_send_route_req(struct sb_config * config, struct sb_connection * con
         log_debug("setting a timeout %d seconds for route req to %s", SB_RT_REQ_TIMEOUT, conn->desc);
         sb_util_set_timeout(conn->route_timer, SB_RT_REQ_TIMEOUT);
     } else {
+        log_info("all log entries(config->rt_total) has been received");
         sb_util_clear_timeout(conn->route_timer);
     }
 }
