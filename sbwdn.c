@@ -301,6 +301,34 @@ void sb_stop_app(struct sb_app * app, int immiedately) {
     }
 }
 
+void sb_dump_status(struct sb_app * app) {
+    log_info("dumping status to %s", app->config->statusfile);
+    /* write status file */
+    FILE * statusf = fopen(app->config->statusfile, "w");
+    if (!statusf) {
+        log_error("failed to open status file %s", app->config->statusfile);
+    } else {
+        fprintf(statusf, "Connections\n");
+        unsigned int conn_num = 0;
+        struct sb_connection * conn;
+        TAILQ_FOREACH(conn, &(app->conns), entries) {
+            conn_num++;
+            fprintf(statusf, "----------------------\n");
+            fprintf(statusf, "desc: %s\n", conn->desc);
+            fprintf(statusf, "net_fd: %d\n", conn->net_fd);
+            fprintf(statusf, "net_mode: %u\n", conn->net_mode);
+            fprintf(statusf, "net_state: %d\n", conn->net_state);
+            /* fprintf(statusf, "cookie: %d", conn->cookie); */
+            fprintf(statusf, "n2t_pkg_count: %d\n", conn->n2t_pkg_count);
+            fprintf(statusf, "t2n_pkg_count: %d\n", conn->t2n_pkg_count);
+            /* fprintf(statusf, "rt_tag: %d", conn->rt_tag); */
+        }
+        fprintf(statusf, "total connections: %u\n", conn_num);
+        fclose(statusf);
+        statusf = 0;
+    }
+}
+
 void sb_sigterm_handler(evutil_socket_t sig, short what, void * data) {
     SB_NOT_USED(sig);
     SB_NOT_USED(what);
@@ -312,7 +340,7 @@ void sb_sigint_handler(evutil_socket_t sig, short what, void * data) {
     SB_NOT_USED(sig);
     SB_NOT_USED(what);
     log_info("SIGINT received");
-    sb_stop_app((struct sb_app *)data, 0);
+    sb_dump_status((struct sb_app*)data);
 }
 
 void sb_sighup_handler(evutil_socket_t sig, short what, void * data) {

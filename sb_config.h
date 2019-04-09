@@ -22,6 +22,7 @@ enum SB_APP_MODE { SB_SERVER, SB_CLIENT };
 #define SB_DEFAULT_LOG_LEVEL "info"
 #define SB_DEFAULT_LOG_PATH "/var/log/sbwdn.log"
 #define SB_DEFAULT_PID_FILE "/var/run/sbwdn.pid"
+#define SB_DEFAULT_STATUS_FILE "/var/run/sbwdn.status"
 
 struct sb_config {
     /* client or server */
@@ -39,6 +40,7 @@ struct sb_config {
     char logfile[PATH_MAX];
     char routefile[PATH_MAX];
     char pidfile[PATH_MAX];
+    char statusfile[PATH_MAX];
     char if_up_script[PATH_MAX];
     char if_down_script[PATH_MAX];
 
