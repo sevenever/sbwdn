@@ -26,6 +26,7 @@
 
 #define SB_RT_COUNT_PER_REQ 128
 #define SB_RT_REQ_TIMEOUT 5
+#define SB_CONN_STAT_TIMEOUT 1
 
 /* this represent an IP package */
 struct sb_package {
@@ -114,6 +115,8 @@ void sb_try_send_route_req(struct sb_config * config, struct sb_connection * con
 int sb_send_route_req(struct sb_config * config, struct sb_connection * conn);
 
 void sb_do_route_timeout(evutil_socket_t fd, short what, void * data);
+
+void sb_do_conn_statstic(evutil_socket_t fd, short what, void * data);
 
 int sb_conn_handle_route_req(struct sb_config * config, struct sb_connection * conn, struct sb_package * pkg);
 

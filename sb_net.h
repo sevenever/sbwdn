@@ -143,6 +143,18 @@ int sb_net_io_buf_read(struct sb_net_io_buf * io_buf, int fd);
  */
 int sb_net_io_buf_write(struct sb_net_io_buf * io_buf, int fd);
 
+struct sb_conn_stat {
+    struct timespec time;
+    uint64_t net_ingress_pkgs;
+    uint64_t net_ingress_bytes;
+    uint64_t net_egress_pkgs;
+    uint64_t net_egress_bytes;
+    uint64_t tun_ingress_pkgs;
+    uint64_t tun_ingress_bytes;
+    uint64_t tun_egress_pkgs;
+    uint64_t tun_egress_bytes;
+};
+
 /* ------------------------------------------------------------------------------------------------
  * sb_connection
  * ------------------------------------------------------------------------------------------------ */
@@ -199,6 +211,8 @@ struct sb_connection {
 
     struct event * keepalive_timer;
 
+    struct event * statistic_timer;
+
     struct event * route_timer;
 
     enum sb_conn_state net_state;
@@ -227,9 +241,15 @@ struct sb_connection {
 
     char desc[SB_CONN_DESC_MAX];
 
-    /* only used to send tag to client, if we know this client get 
+    /* only used to send tag to client, if we know this client get
      * the latest route tag, we set this the same as config->rt_tag */
     char rt_tag[SB_RT_TAG_SIZE];
+
+    time_t conn_time; /* when the connection started */
+    struct sb_conn_stat stat;
+    struct sb_conn_stat sample_start_stat;
+    struct sb_conn_stat sample_end_stat;
+
     TAILQ_ENTRY(sb_connection) entries;
 };
 

@@ -12,6 +12,7 @@
 #include <signal.h>
 #include <syslog.h>
 #include <sys/stat.h>
+#include <inttypes.h>
 
 #include "sb_log.h"
 #include "sb_config.h"
@@ -97,6 +98,9 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
                         log_error("failed to create a sb_package for %s, dropping", conn->desc);
                         break;
                     }
+                    /* statistics */
+                    conn->stat.tun_ingress_pkgs++;
+                    conn->stat.tun_ingress_bytes += pkg->ipdatalen;
                     log_trace("queuing a pkg from tun for connection %s", conn->desc);
                     TAILQ_INSERT_TAIL(&(conn->packages_t2n), pkg, entries);
                     conn->t2n_pkg_count++;
@@ -154,6 +158,9 @@ void sb_do_tun_write(evutil_socket_t fd, short what, void * data) {
                 break;
             }
         } else {
+            /* statistics */
+            conn->stat.tun_egress_pkgs++;
+            conn->stat.tun_egress_bytes += pkg->ipdatalen;
             /* tun will not write incomplete*/
             log_trace("sent a pkg with length %d to tun", ret);
             TAILQ_REMOVE(&(conn->packages_n2t), pkg, entries);
@@ -311,10 +318,13 @@ void sb_dump_status(struct sb_app * app) {
         fprintf(statusf, "Connections\n");
         unsigned int conn_num = 0;
         struct sb_connection * conn;
+        char time_buf[128];
         TAILQ_FOREACH(conn, &(app->conns), entries) {
             conn_num++;
+            strftime(time_buf, sizeof(time_buf), "%y/%m/%d:%H:%M:%S", localtime( &(conn->conn_time)));
             fprintf(statusf, "----------------------\n");
             fprintf(statusf, "desc: %s\n", conn->desc);
+            fprintf(statusf, "conn_time: %s\n", time_buf);
             fprintf(statusf, "net_fd: %d\n", conn->net_fd);
             fprintf(statusf, "net_mode: %u\n", conn->net_mode);
             fprintf(statusf, "net_state: %d\n", conn->net_state);
@@ -322,8 +332,61 @@ void sb_dump_status(struct sb_app * app) {
             fprintf(statusf, "n2t_pkg_count: %d\n", conn->n2t_pkg_count);
             fprintf(statusf, "t2n_pkg_count: %d\n", conn->t2n_pkg_count);
             /* fprintf(statusf, "rt_tag: %d", conn->rt_tag); */
+            struct sb_conn_stat * start_stat, * end_stat;
+            start_stat = &(conn->sample_start_stat);
+            end_stat = &(conn->sample_end_stat);
+
+            fprintf(statusf, "net_ingress_pkgs: %"PRIu64"\n", end_stat->net_ingress_pkgs);
+            fprintf(statusf, "net_ingress_bytes: %"PRIu64"\n", end_stat->net_ingress_bytes);
+            fprintf(statusf, "net_egress_pkgs: %"PRIu64"\n", end_stat->net_egress_pkgs);
+            fprintf(statusf, "net_egress_bytes: %"PRIu64"\n", end_stat->net_egress_bytes);
+            fprintf(statusf, "tun_ingress_pkgs: %"PRIu64"\n", end_stat->tun_ingress_pkgs);
+            fprintf(statusf, "tun_ingress_bytes: %"PRIu64"\n", end_stat->tun_ingress_bytes);
+            fprintf(statusf, "tun_egress_pkgs: %"PRIu64"\n", end_stat->tun_egress_pkgs);
+            fprintf(statusf, "tun_egress_bytes: %"PRIu64"\n", end_stat->tun_egress_bytes);
+            if (conn->sample_start_stat.time.tv_sec != 0) {
+                uint64_t net_ingress_pkgs;
+                uint64_t net_ingress_bytes;
+                uint64_t net_egress_pkgs;
+                uint64_t net_egress_bytes;
+                uint64_t tun_ingress_pkgs;
+                uint64_t tun_ingress_bytes;
+                uint64_t tun_egress_pkgs;
+                uint64_t tun_egress_bytes;
+
+                int64_t nsec_span = (end_stat->time.tv_sec - start_stat->time.tv_sec) * 1000000000 + (end_stat->time.tv_nsec - start_stat->time.tv_nsec);
+
+                net_ingress_pkgs = max(end_stat->net_ingress_pkgs - start_stat->net_ingress_pkgs, 0);
+                net_ingress_bytes = max(end_stat->net_ingress_bytes - start_stat->net_ingress_bytes, 0);
+                net_egress_pkgs = max(end_stat->net_egress_pkgs - start_stat->net_egress_pkgs, 0);
+                net_egress_bytes = max(end_stat->net_egress_bytes - start_stat->net_egress_bytes, 0);
+                tun_ingress_pkgs = max(end_stat->tun_ingress_pkgs - start_stat->tun_ingress_pkgs, 0);
+                tun_ingress_bytes = max(end_stat->tun_ingress_bytes - start_stat->tun_ingress_bytes, 0);
+                tun_egress_pkgs = max(end_stat->tun_egress_pkgs - start_stat->tun_egress_pkgs, 0);
+                tun_egress_bytes = max(end_stat->tun_egress_bytes - start_stat->tun_egress_bytes, 0);
+
+                if (nsec_span != 0) {
+                    fprintf(statusf, "net_ingress_pkgs: %"PRIu64" pkg per second\n", net_ingress_pkgs * 1000000000 / nsec_span);
+                    fprintf(statusf, "net_ingress_bytes: %"PRIu64" bytes per second\n", net_ingress_bytes * 1000000000 / nsec_span);
+                    fprintf(statusf, "net_egress_pkgs: %"PRIu64" pkg per second\n", net_egress_pkgs * 1000000000 / nsec_span);
+                    fprintf(statusf, "net_egress_bytes: %"PRIu64" bytes per second\n", net_egress_bytes * 1000000000 / nsec_span);
+                    fprintf(statusf, "tun_ingress_pkgs: %"PRIu64" pkg per second\n", tun_ingress_pkgs * 1000000000 / nsec_span);
+                    fprintf(statusf, "tun_ingress_bytes: %"PRIu64" bytes per second\n", tun_ingress_bytes * 1000000000 / nsec_span);
+                    fprintf(statusf, "tun_egress_pkgs: %"PRIu64" pkg per second\n", tun_egress_pkgs * 1000000000 / nsec_span);
+                    fprintf(statusf, "tun_egress_bytes: %"PRIu64" bytes per second\n", tun_egress_bytes * 1000000000 / nsec_span);
+                } else {
+                    fprintf(statusf, "net_ingress_pkgs: - \n");
+                    fprintf(statusf, "net_ingress_bytes: - \n");
+                    fprintf(statusf, "net_egress_pkgs: - \n");
+                    fprintf(statusf, "net_egress_bytes: - \n");
+                    fprintf(statusf, "tun_ingress_pkgs: - \n");
+                    fprintf(statusf, "tun_ingress_bytes: - \n");
+                    fprintf(statusf, "tun_egress_pkgs: - \n");
+                    fprintf(statusf, "tun_egress_bytes: - \n");
+                }
+            }
         }
-        fprintf(statusf, "total connections: %u\n", conn_num);
+        fprintf(statusf, "\ntotal connections: %u\n", conn_num);
         fclose(statusf);
         statusf = 0;
     }
@@ -400,7 +463,7 @@ int sb_daemonize() {
     umask(0);
 
     closelog();
-    /* close c runtime stdios, otherwise it will ruin memory 
+    /* close c runtime stdios, otherwise it will ruin memory
      * when closing the underlying fds.
      * I am looking at you, uclibc
      */

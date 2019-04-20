@@ -18,7 +18,7 @@
 int sb_client_socket(unsigned int mode, struct sockaddr_in * server_addr, socklen_t addr_len) {
     int fd = -1;
     int fail = 0;
-    
+
     do {
         /* Create our listening socket. */
         fd = socket(server_addr->sin_family, (mode == SB_NET_MODE_TCP ? SOCK_STREAM : SOCK_DGRAM), 0);
@@ -122,7 +122,7 @@ int sb_server_socket(unsigned int mode, struct sockaddr_in * listen_addr, sockle
 int sb_set_no_frament(int fd) {
 #if defined(IP_DONTFRAG)
     int val = 1;
-    
+
     log_debug("setting IP_DONTFRAG");
     if (setsockopt(fd, IPPROTO_IP, IP_DONTFRAG, &val, sizeof(int)) < 0) {
         log_error("failed to set IP_DONTFRAG for fd %d", fd);
@@ -130,7 +130,7 @@ int sb_set_no_frament(int fd) {
     }
 #elif defined(IP_MTU_DISCOVER)
     int val = 1;
-    
+
     log_debug("setting IP_MTU_DISCOVER");
     if (setsockopt(fd, IPPROTO_IP, IP_MTU_DISCOVER, &val, sizeof(int)) < 0) {
         log_error("failed to set IP_DONTFRAG for fd %d", fd);
@@ -336,17 +336,20 @@ void sb_try_client_connect(evutil_socket_t notused, short what, void * data) {
             struct event * udp_readevent;
             struct event * udp_writeevent;
 
+            /* client_fd may be the same as previous one, so we need to ensure event_free previous event before event_add new event */
+            if (app->udp_readevent) {
+                event_del(app->udp_readevent);
+                event_free(app->udp_readevent);
+            }
+            if (app->udp_writeevent) {
+                event_del(app->udp_writeevent);
+                event_free(app->udp_writeevent);
+            }
             udp_readevent = event_new(app->eventbase, client_fd, EV_READ|EV_PERSIST, sb_do_udp_read, app);
             udp_writeevent = event_new(app->eventbase, client_fd, EV_WRITE|EV_PERSIST, sb_do_udp_write, app);
             event_add(udp_readevent, 0);
             event_add(udp_writeevent, 0);
-            if (app->udp_readevent) {
-                event_free(app->udp_readevent);
-            }
             app->udp_readevent = udp_readevent;
-            if (app->udp_writeevent) {
-                event_free(app->udp_writeevent);
-            }
             app->udp_writeevent = udp_writeevent;
         }
     } while(0);
@@ -580,6 +583,9 @@ void sb_do_tcp_write(evutil_socket_t fd, short what, void * data) {
                         break;
                     }
                 } else {
+                    /* statistics */
+                    conn->stat.net_egress_pkgs++;
+                    conn->stat.net_egress_bytes += writing_pkg->ipdatalen;
                     TAILQ_REMOVE(&(conn->packages_t2n), writing_pkg, entries);
                     conn->t2n_pkg_count--;
                     free(writing_pkg->ipdata);
@@ -642,6 +648,9 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
                 continue;
             }
         } else {
+            /* statistics */
+            conn->stat.net_egress_pkgs++;
+            conn->stat.net_egress_bytes += pkg->ipdatalen;
             TAILQ_REMOVE(&conn->packages_t2n, pkg, entries);
             conn->t2n_pkg_count--;
             free(pkg->ipdata);
