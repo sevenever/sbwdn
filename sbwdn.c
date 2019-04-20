@@ -113,7 +113,7 @@ void sb_do_tun_read(evutil_socket_t fd, short what, void * data) {
                 event_add(conn->net_writeevent, 0);
             }
         }
-        if (enable_udp_write && app->config->net_mode == SB_NET_MODE_UDP) {
+        if (enable_udp_write && app->config->net_mode == SB_NET_MODE_UDP && app->udp_writeevent) {
             log_trace("enabling write for udp");
             event_add(app->udp_writeevent, 0);
         }
@@ -301,7 +301,7 @@ void sb_stop_app(struct sb_app * app, int immiedately) {
                 event_add(conn->net_writeevent, 0);
             }
         }
-        if (app->config->net_mode == SB_NET_MODE_UDP) {
+        if (app->config->net_mode == SB_NET_MODE_UDP && app->udp_writeevent) {
             log_debug("enable udp write");
             event_add(app->udp_writeevent, 0);
         }

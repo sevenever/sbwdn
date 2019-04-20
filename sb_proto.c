@@ -161,7 +161,20 @@ void sb_connection_del(struct sb_connection * conn) {
 
     conn->net_state = TERMINATED_4;
 
-    if (conn->net_mode == SB_NET_MODE_TCP) {
+    if (conn->net_mode == SB_NET_MODE_UDP && config->app_mode == SB_CLIENT) {
+        if (app->udp_readevent) {
+            event_del(app->udp_readevent);
+            event_free(app->udp_readevent);
+            app->udp_readevent = 0;
+        }
+        if (app->udp_writeevent) {
+            event_del(app->udp_writeevent);
+            event_free(app->udp_writeevent);
+            app->udp_writeevent = 0;
+        }
+    }
+
+    if (conn->net_mode == SB_NET_MODE_TCP || config->app_mode == SB_CLIENT) {
         close(conn->net_fd);
     }
 
