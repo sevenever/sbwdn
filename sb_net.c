@@ -633,7 +633,7 @@ void sb_do_udp_write(evutil_socket_t fd, short what, void * data) {
         buf.len_buf = htonl(pkg->ipdatalen);
         memcpy(buf.pkg_buf, pkg->ipdata, pkg->ipdatalen);
         int frame_size = SB_NET_BUF_HEADER_SIZE + pkg->ipdatalen;
-        log_debug("writing a pkg with legnth %d to %s", frame_size, conn->desc);
+        log_debug("writing a pkg with length %d to %s", frame_size, conn->desc);
         ret = sendto(fd, &buf, frame_size, 0, (const struct sockaddr *)&conn->peer_addr, sizeof(conn->peer_addr));
         if (ret < 0) {
             log_debug("failed to send package to %s: %s, dropping", sb_util_human_endpoint((struct sockaddr *)&conn->peer_addr), sb_util_strerror(errno));

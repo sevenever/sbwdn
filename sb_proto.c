@@ -161,7 +161,7 @@ void sb_connection_del(struct sb_connection * conn) {
 
     conn->net_state = TERMINATED_4;
 
-    if (conn->net_mode == SB_NET_MODE_TCP || config->app_mode == SB_CLIENT) {
+    if (conn->net_mode == SB_NET_MODE_TCP) {
         close(conn->net_fd);
     }
 
