@@ -53,6 +53,12 @@ struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, uns
 
     conn->route_timer = event_new(conn->eventbase, -1, EV_PERSIST, sb_do_route_timeout, conn);
 
+    conn->statistic_timer = event_new(conn->eventbase, -1, EV_PERSIST, sb_do_conn_statstic, conn);
+    /* setup time-out callback */
+    sb_util_set_timeout(conn->statistic_timer, SB_CONN_STAT_TIMEOUT);
+
+    clock_gettime(CLOCK_MONOTONIC_RAW, &(conn->sample_end_stat.time));
+
     conn->net_state = NEW_0;
 
     conn->peer_addr = peer;
@@ -149,12 +155,16 @@ void sb_connection_del(struct sb_connection * conn) {
     event_free(conn->route_timer);
     conn->route_timer = 0;
 
+    event_del(conn->statistic_timer);
+    event_free(conn->statistic_timer);
+    conn->statistic_timer = 0;
+
     conn->net_state = TERMINATED_4;
 
     if (conn->net_mode == SB_NET_MODE_TCP || config->app_mode == SB_CLIENT) {
         close(conn->net_fd);
     }
-    
+
     conn->eventbase = 0;
     conn->app = 0;
 
@@ -223,6 +233,10 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
     int queued = 0;
 
     log_enter_func();
+    /* statistics */
+    conn->stat.net_ingress_pkgs++;
+    conn->stat.net_ingress_bytes += pkg->ipdatalen;
+
     switch(conn->net_state) {
         case NEW_0:
             /* client */
@@ -421,23 +435,26 @@ int sb_conn_state_change_hook(struct sb_connection * conn, int newstate) {
     char peer_vpn_addr[INET6_ADDRSTRLEN];
     char peer_addr[INET6_ADDRSTRLEN];
 
-    if (newstate == ESTABLISHED_2 && strlen(config->if_up_script) > 0) {
-        strncpy(vpn_addr, sb_util_human_addr(AF_INET, &conn->vpn_addr), sizeof(vpn_addr));
-        strncpy(peer_vpn_addr, sb_util_human_addr(AF_INET, &conn->peer_vpn_addr), sizeof(peer_vpn_addr));
-        strncpy(peer_addr, sb_util_human_addr(AF_INET, &((struct sockaddr_in*)&conn->peer_addr)->sin_addr), sizeof(peer_addr));
-        snprintf(cmd, sizeof(cmd), "%s %s %s %s %s %d %d %d ",
-                config->if_up_script,
-                app->tunname,
-                vpn_addr,
-                peer_vpn_addr,
-                peer_addr,
-                ntohs(conn->peer_addr.sin_port),
-                conn->net_mode,
-                newstate) < 0 ? abort() : (void) 0; /* to suppress gcc's -Wformat-truncation= */
-        log_info("executing if_up_script: %s", cmd);
-        ret = system(cmd);
-        if (ret != 0) {
-            log_error("failed to execute if_up_script: %s, ret is %d, error is %s", cmd, ret, sb_util_strerror(errno));
+    if (newstate == ESTABLISHED_2) {
+        conn->conn_time = time(NULL);
+        if (strlen(config->if_up_script) > 0) {
+            strncpy(vpn_addr, sb_util_human_addr(AF_INET, &conn->vpn_addr), sizeof(vpn_addr));
+            strncpy(peer_vpn_addr, sb_util_human_addr(AF_INET, &conn->peer_vpn_addr), sizeof(peer_vpn_addr));
+            strncpy(peer_addr, sb_util_human_addr(AF_INET, &((struct sockaddr_in*)&conn->peer_addr)->sin_addr), sizeof(peer_addr));
+            snprintf(cmd, sizeof(cmd), "%s %s %s %s %s %d %d %d ",
+                    config->if_up_script,
+                    app->tunname,
+                    vpn_addr,
+                    peer_vpn_addr,
+                    peer_addr,
+                    ntohs(conn->peer_addr.sin_port),
+                    conn->net_mode,
+                    newstate) < 0 ? abort() : (void) 0; /* to suppress gcc's -Wformat-truncation= */
+            log_info("executing if_up_script: %s", cmd);
+            ret = system(cmd);
+            if (ret != 0) {
+                log_error("failed to execute if_up_script: %s, ret is %d, error is %s", cmd, ret, sb_util_strerror(errno));
+            }
         }
     } else if (newstate == TERMINATED_4 && strlen(config->if_down_script) > 0) {
         strncpy(vpn_addr, sb_util_human_addr(AF_INET, &conn->vpn_addr), sizeof(vpn_addr));
@@ -825,3 +842,12 @@ void sb_do_route_timeout(evutil_socket_t fd, short what, void * data) {
     }
 }
 
+void sb_do_conn_statstic(evutil_socket_t fd, short what, void * data) {
+    SB_NOT_USED(fd);
+    SB_NOT_USED(what);
+    struct sb_connection * conn = (struct sb_connection *) data;
+
+    conn->sample_start_stat = conn->sample_end_stat;
+    conn->sample_end_stat = conn->stat;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &(conn->sample_end_stat.time));
+}
