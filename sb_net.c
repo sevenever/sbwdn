@@ -336,17 +336,20 @@ void sb_try_client_connect(evutil_socket_t notused, short what, void * data) {
             struct event * udp_readevent;
             struct event * udp_writeevent;
 
+            /* client_fd may be the same as previous one, so we need to ensure event_free previous event before event_add new event */
+            if (app->udp_readevent) {
+                event_del(app->udp_readevent);
+                event_free(app->udp_readevent);
+            }
+            if (app->udp_writeevent) {
+                event_del(app->udp_writeevent);
+                event_free(app->udp_writeevent);
+            }
             udp_readevent = event_new(app->eventbase, client_fd, EV_READ|EV_PERSIST, sb_do_udp_read, app);
             udp_writeevent = event_new(app->eventbase, client_fd, EV_WRITE|EV_PERSIST, sb_do_udp_write, app);
             event_add(udp_readevent, 0);
             event_add(udp_writeevent, 0);
-            if (app->udp_readevent) {
-                event_free(app->udp_readevent);
-            }
             app->udp_readevent = udp_readevent;
-            if (app->udp_writeevent) {
-                event_free(app->udp_writeevent);
-            }
             app->udp_writeevent = udp_writeevent;
         }
     } while(0);

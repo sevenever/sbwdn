@@ -57,7 +57,7 @@ struct sb_connection * sb_connection_new(struct sb_app * app, int client_fd, uns
     /* setup time-out callback */
     sb_util_set_timeout(conn->statistic_timer, SB_CONN_STAT_TIMEOUT);
 
-    clock_gettime(CLOCK_MONOTONIC_RAW, &(conn->sample_end_stat.time));
+    clock_gettime(CLOCK_MONOTONIC, &(conn->sample_end_stat.time));
 
     conn->net_state = NEW_0;
 
@@ -849,5 +849,5 @@ void sb_do_conn_statstic(evutil_socket_t fd, short what, void * data) {
 
     conn->sample_start_stat = conn->sample_end_stat;
     conn->sample_end_stat = conn->stat;
-    clock_gettime(CLOCK_MONOTONIC_RAW, &(conn->sample_end_stat.time));
+    clock_gettime(CLOCK_MONOTONIC, &(conn->sample_end_stat.time));
 }

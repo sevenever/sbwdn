@@ -12,6 +12,7 @@
 #include <signal.h>
 #include <syslog.h>
 #include <sys/stat.h>
+#include <inttypes.h>
 
 #include "sb_log.h"
 #include "sb_config.h"
@@ -335,25 +336,25 @@ void sb_dump_status(struct sb_app * app) {
             start_stat = &(conn->sample_start_stat);
             end_stat = &(conn->sample_end_stat);
 
-            fprintf(statusf, "net_ingress_pkgs: %lu\n", end_stat->net_ingress_pkgs);
-            fprintf(statusf, "net_ingress_bytes: %lu\n", end_stat->net_ingress_bytes);
-            fprintf(statusf, "net_egress_pkgs: %lu\n", end_stat->net_egress_pkgs);
-            fprintf(statusf, "net_egress_bytes: %lu\n", end_stat->net_egress_bytes);
-            fprintf(statusf, "tun_ingress_pkgs: %lu\n", end_stat->tun_ingress_pkgs);
-            fprintf(statusf, "tun_ingress_bytes: %lu\n", end_stat->tun_ingress_bytes);
-            fprintf(statusf, "tun_egress_pkgs: %lu\n", end_stat->tun_egress_pkgs);
-            fprintf(statusf, "tun_egress_bytes: %lu\n", end_stat->tun_egress_bytes);
+            fprintf(statusf, "net_ingress_pkgs: %"PRIu64"\n", end_stat->net_ingress_pkgs);
+            fprintf(statusf, "net_ingress_bytes: %"PRIu64"\n", end_stat->net_ingress_bytes);
+            fprintf(statusf, "net_egress_pkgs: %"PRIu64"\n", end_stat->net_egress_pkgs);
+            fprintf(statusf, "net_egress_bytes: %"PRIu64"\n", end_stat->net_egress_bytes);
+            fprintf(statusf, "tun_ingress_pkgs: %"PRIu64"\n", end_stat->tun_ingress_pkgs);
+            fprintf(statusf, "tun_ingress_bytes: %"PRIu64"\n", end_stat->tun_ingress_bytes);
+            fprintf(statusf, "tun_egress_pkgs: %"PRIu64"\n", end_stat->tun_egress_pkgs);
+            fprintf(statusf, "tun_egress_bytes: %"PRIu64"\n", end_stat->tun_egress_bytes);
             if (conn->sample_start_stat.time.tv_sec != 0) {
-                unsigned long net_ingress_pkgs;
-                unsigned long net_ingress_bytes;
-                unsigned long net_egress_pkgs;
-                unsigned long net_egress_bytes;
-                unsigned long tun_ingress_pkgs;
-                unsigned long tun_ingress_bytes;
-                unsigned long tun_egress_pkgs;
-                unsigned long tun_egress_bytes;
+                uint64_t net_ingress_pkgs;
+                uint64_t net_ingress_bytes;
+                uint64_t net_egress_pkgs;
+                uint64_t net_egress_bytes;
+                uint64_t tun_ingress_pkgs;
+                uint64_t tun_ingress_bytes;
+                uint64_t tun_egress_pkgs;
+                uint64_t tun_egress_bytes;
 
-                long nsec_span = (end_stat->time.tv_sec - start_stat->time.tv_sec) * 1000000000 + (end_stat->time.tv_nsec - start_stat->time.tv_nsec);
+                int64_t nsec_span = (end_stat->time.tv_sec - start_stat->time.tv_sec) * 1000000000 + (end_stat->time.tv_nsec - start_stat->time.tv_nsec);
 
                 net_ingress_pkgs = max(end_stat->net_ingress_pkgs - start_stat->net_ingress_pkgs, 0);
                 net_ingress_bytes = max(end_stat->net_ingress_bytes - start_stat->net_ingress_bytes, 0);
@@ -365,14 +366,14 @@ void sb_dump_status(struct sb_app * app) {
                 tun_egress_bytes = max(end_stat->tun_egress_bytes - start_stat->tun_egress_bytes, 0);
 
                 if (nsec_span != 0) {
-                    fprintf(statusf, "net_ingress_pkgs: %lu pkg per second\n", net_ingress_pkgs * 1000000000 / nsec_span);
-                    fprintf(statusf, "net_ingress_bytes: %lu bytes per second\n", net_ingress_bytes * 1000000000 / nsec_span);
-                    fprintf(statusf, "net_egress_pkgs: %lu pkg per second\n", net_egress_pkgs * 1000000000 / nsec_span);
-                    fprintf(statusf, "net_egress_bytes: %lu bytes per second\n", net_egress_bytes * 1000000000 / nsec_span);
-                    fprintf(statusf, "tun_ingress_pkgs: %lu pkg per second\n", tun_ingress_pkgs * 1000000000 / nsec_span);
-                    fprintf(statusf, "tun_ingress_bytes: %lu bytes per second\n", tun_ingress_bytes * 1000000000 / nsec_span);
-                    fprintf(statusf, "tun_egress_pkgs: %lu pkg per second\n", tun_egress_pkgs * 1000000000 / nsec_span);
-                    fprintf(statusf, "tun_egress_bytes: %lu bytes per second\n", tun_egress_bytes * 1000000000 / nsec_span);
+                    fprintf(statusf, "net_ingress_pkgs: %"PRIu64" pkg per second\n", net_ingress_pkgs * 1000000000 / nsec_span);
+                    fprintf(statusf, "net_ingress_bytes: %"PRIu64" bytes per second\n", net_ingress_bytes * 1000000000 / nsec_span);
+                    fprintf(statusf, "net_egress_pkgs: %"PRIu64" pkg per second\n", net_egress_pkgs * 1000000000 / nsec_span);
+                    fprintf(statusf, "net_egress_bytes: %"PRIu64" bytes per second\n", net_egress_bytes * 1000000000 / nsec_span);
+                    fprintf(statusf, "tun_ingress_pkgs: %"PRIu64" pkg per second\n", tun_ingress_pkgs * 1000000000 / nsec_span);
+                    fprintf(statusf, "tun_ingress_bytes: %"PRIu64" bytes per second\n", tun_ingress_bytes * 1000000000 / nsec_span);
+                    fprintf(statusf, "tun_egress_pkgs: %"PRIu64" pkg per second\n", tun_egress_pkgs * 1000000000 / nsec_span);
+                    fprintf(statusf, "tun_egress_bytes: %"PRIu64" bytes per second\n", tun_egress_bytes * 1000000000 / nsec_span);
                 } else {
                     fprintf(statusf, "net_ingress_pkgs: - \n");
                     fprintf(statusf, "net_ingress_bytes: - \n");

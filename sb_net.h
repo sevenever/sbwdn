@@ -145,14 +145,14 @@ int sb_net_io_buf_write(struct sb_net_io_buf * io_buf, int fd);
 
 struct sb_conn_stat {
     struct timespec time;
-    unsigned long net_ingress_pkgs;
-    unsigned long net_ingress_bytes;
-    unsigned long net_egress_pkgs;
-    unsigned long net_egress_bytes;
-    unsigned long tun_ingress_pkgs;
-    unsigned long tun_ingress_bytes;
-    unsigned long tun_egress_pkgs;
-    unsigned long tun_egress_bytes;
+    uint64_t net_ingress_pkgs;
+    uint64_t net_ingress_bytes;
+    uint64_t net_egress_pkgs;
+    uint64_t net_egress_bytes;
+    uint64_t tun_ingress_pkgs;
+    uint64_t tun_ingress_bytes;
+    uint64_t tun_egress_pkgs;
+    uint64_t tun_egress_bytes;
 };
 
 /* ------------------------------------------------------------------------------------------------
