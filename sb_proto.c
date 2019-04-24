@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <time.h>
 
 #include "sb_log.h"
 #include "sb_util.h"
