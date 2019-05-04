@@ -10,6 +10,7 @@
 
 /* seconds between send keepalive */
 #define SB_KEEPALIVE_INTERVAL 10
+#define SB_KEEPALIVE_DATA_SIZE 16
 
 #define SB_PKG_TYPE_INIT_1 1
 #define SB_PKG_TYPE_DATA_2 2
@@ -21,8 +22,10 @@
 #define SB_PKG_TYPE_ROUTE_REQ_8 8
 #define SB_PKG_TYPE_ROUTE_RESP_9 9
 
-#define SB_DUMMY_PKG_DATA "SB"
-#define SB_DUMMY_PKG_DATA_LEN 2
+#define SB_HELLO_PKG_DATA "Hello SB"
+#define SB_HELLO_PKG_DATA_LEN 8
+#define SB_BYE_PKG_DATA "Bye SB"
+#define SB_BYE_PKG_DATA_LEN 6
 
 #define SB_RT_COUNT_PER_REQ 128
 #define SB_RT_REQ_TIMEOUT 5
