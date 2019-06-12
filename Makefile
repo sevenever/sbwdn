@@ -1,7 +1,8 @@
 TARGET = sbwdn
 LIBS = -levent -lconfuse
 CC = gcc
-override CFLAGS += --std=gnu99 $(DEBUGFLAG) -Wall -Wextra -Wno-address-of-packed-member
+SB_GIT_VERSION := "$(shell git describe --abbrev=8 --dirty --always --tags 2>/dev/null || echo 'not built in git environment')"
+override CFLAGS += --std=gnu99 $(DEBUGFLAG) -DSB_GIT_VERSION=\"$(SB_GIT_VERSION)\" -Wall -Wextra -Wno-address-of-packed-member
 override LFLAGS += $(DEBUGFLAG) -Wall -Wextra
 
 .PHONY: default all clean

@@ -483,6 +483,11 @@ int sb_daemonize() {
 }
 
 int main(int argc, char ** argv) {
+    if (argc == 2 && strncmp(argv[1], "-v", 2) == 0) {
+        printf("version: %s\n", SB_GIT_VERSION);
+        return 0;
+    }
+
     /* init logger */
     log_init(&sb_logger);
     /* set fp to NULL, so that logs goes to syslog before log file is open */
