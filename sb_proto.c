@@ -718,6 +718,10 @@ int sb_send_route_req(struct sb_config * config, struct sb_connection * conn) {
     req.rt_total = htonl(config->rt_total);
     req.offset = htonl(config->rt_cnt);
     req.count = htonl(SB_RT_COUNT_PER_REQ);
+    if (sb_util_random(req.rnd, SB_RND_DATA_SIZE) < 0) {
+        log_error("failed to generate random data for route req to %s", conn->desc);
+        return -1;
+    }
     struct sb_package * rt_req_pkg = sb_package_new(SB_PKG_TYPE_ROUTE_REQ_8, &req, sizeof(struct sb_route_req_data));
     if (!rt_req_pkg) {
         log_error("failed to create a route req package");

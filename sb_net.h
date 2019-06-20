@@ -19,6 +19,7 @@
 
 #define SB_COOKIE_SIZE 8
 #define SB_RT_TAG_SIZE 8
+#define SB_RND_DATA_SIZE 8
 
 /* how long should we wait before next reconnect, max value*/
 #define SB_CLIENT_RETRY_INTERVAL_MAX 300
@@ -85,6 +86,7 @@ struct __attribute__ ((packed)) sb_route_req_data {
     uint32_t rt_total;
     uint32_t offset;
     uint32_t count;
+    char rnd[SB_RND_DATA_SIZE];
 };
 
 struct __attribute__ ((packed)) sb_route_resp_data {
