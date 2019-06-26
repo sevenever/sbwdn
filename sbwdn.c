@@ -523,6 +523,8 @@ int main(int argc, char ** argv) {
     log_info("hello, I am now a daemon");
 #endif
 
+    log_info("running version: "SB_GIT_VERSION);
+
     {
         /* write pid file */
         FILE * pidf = fopen(config->pidfile, "w");
