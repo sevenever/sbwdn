@@ -22,6 +22,7 @@
 #define SB_RND_DATA_SIZE 8
 
 /* how long should we wait before next reconnect, max value*/
+#define SB_CLIENT_RETRY_INTERVAL_INC_LINEAR 32
 #define SB_CLIENT_RETRY_INTERVAL_MAX 300
 
 #define SB_RT_OP_ADD 1

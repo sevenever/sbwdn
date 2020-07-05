@@ -5,7 +5,6 @@
 
 #include "sb_net.h"
 
-#define SB_PROTO_MULTI_SYNC_NUM 3
 #define SB_PROTO_MULTI_RT_NUM 2
 
 /* seconds between send keepalive */

@@ -227,17 +227,14 @@ void sb_connection_say_hello(struct sb_connection * conn) {
     }
 
     /* send 3 syncs if UDP, in case of dropping */
-    int pkg_cnt = conn->net_mode == SB_NET_MODE_UDP ? SB_PROTO_MULTI_SYNC_NUM : 1;
-    for (int i = 0; i< pkg_cnt; i++) {
-        /* put a initial package into packages_t2n, so that it can be send to server */
-        struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, SB_HELLO_PKG_DATA, SB_HELLO_PKG_DATA_LEN);
-        if (!init_pkg) {
-            log_error("failed to create init pkg");
-            return;
-        }
-        TAILQ_INSERT_TAIL(&(conn->packages_t2n), init_pkg, entries);
-        conn->t2n_pkg_count++;
+    /* put a initial package into packages_t2n, so that it can be send to server */
+    struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, SB_HELLO_PKG_DATA, SB_HELLO_PKG_DATA_LEN);
+    if (!init_pkg) {
+        log_error("failed to create init pkg");
+        return;
     }
+    TAILQ_INSERT_TAIL(&(conn->packages_t2n), init_pkg, entries);
+    conn->t2n_pkg_count++;
     sb_connection_change_net_state(conn, CONNECTED_1);
     return;
 }

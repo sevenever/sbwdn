@@ -367,10 +367,13 @@ void sb_schedule_reconnect(struct sb_app * app) {
     log_warn("failed to connect to server, will retry in %d seconds", app->retry_interval);
     event_add(app->reconnect_event, &interval);
 
-    if (app->retry_interval < SB_CLIENT_RETRY_INTERVAL_MAX) {
+    /* increase the reconnect interval linearly, then exponentially */
+    if (app->retry_interval < SB_CLIENT_RETRY_INTERVAL_INC_LINEAR) {
+        app->retry_interval += 1;
+    } else if (app->retry_interval < SB_CLIENT_RETRY_INTERVAL_MAX) {
         app->retry_interval *= 2;
-        app->retry_interval = app->retry_interval > SB_CLIENT_RETRY_INTERVAL_MAX ? SB_CLIENT_RETRY_INTERVAL_MAX : app->retry_interval;
     }
+    app->retry_interval = app->retry_interval > SB_CLIENT_RETRY_INTERVAL_MAX ? SB_CLIENT_RETRY_INTERVAL_MAX : app->retry_interval;
 }
 
 void sb_stop_reconnect(struct sb_app * app) {
