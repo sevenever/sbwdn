@@ -671,6 +671,9 @@ int main(int argc, char ** argv) {
 
     sb_app_del(app);
 
+    /*do we need to check content of pid file match currentn pid?*/
+    unlink(config->pidfile);
+
     return 0;
 }
 
