@@ -5,10 +5,12 @@
 # cross compile for openwrt:
 
 export STAGING_DIR=\<your staging dir\>
+export PATH=${PATH}:${STAGING_DIR}/bin
 
 export STAGING_DIR=/home/xxxx/git/openwrt/openwrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2
+export PATH=${PATH}:${STAGING_DIR}/bin
 
-see https://wiki.openwrt.org/doc/devel/crosscompile for more info
+see https://openwrt.org/docs/guide-developer/crosscompile for more info
 
 ## compile libevent:
 
