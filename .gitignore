@@ -1,3 +1,7 @@
 sbwdn
 *.o
+.clangd
+.cache
+build
+compile_commands.json
 
