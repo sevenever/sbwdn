@@ -70,6 +70,14 @@ struct __attribute__ ((packed)) sb_net_buf {
 
 #define SB_NET_BUF_HEADER_SIZE offsetof(struct sb_net_buf, pkg_buf)
 
+struct __attribute__ ((packed)) sb_hello_pkg_data {
+    uint8_t version;
+    uint8_t padding1;
+    uint8_t padding2;
+    uint8_t padding3;
+    char    data[4];
+};
+
 struct __attribute__ ((packed)) sb_cookie_pkg_data {
     char cookie[SB_COOKIE_SIZE];
     struct in_addr server_vpn_addr;

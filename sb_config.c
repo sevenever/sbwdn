@@ -149,6 +149,19 @@ struct sb_config * sb_config_read(const char * config_file) {
                 break;
             }
             log_debug("remote address is set to %s", config->remote);
+
+            const char * addr_str = cfg_getstr(cfg, "addr");
+            if (strlen(addr_str) != 0) {
+                if (inet_pton(AF_INET, addr_str, &config->addr) <= 0) {
+                    log_fatal("failed to parse addr address %s", addr_str);
+                    failed = 1;
+                    break;
+                }
+                log_debug("local address is set to %s", addr_str);
+            } else {
+                memset(&config->addr, 0, sizeof(config->addr));
+                log_debug("local address is not set, will use address from server");
+            }
         }
 
         config->port = cfg_getint(cfg, "port");

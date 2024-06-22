@@ -226,9 +226,17 @@ void sb_connection_say_hello(struct sb_connection * conn) {
         return;
     }
 
+    struct sb_hello_pkg_data hello_pkg_data;
+    if (conn->app->config->addr.s_addr == INADDR_ANY) {
+        memcpy(&hello_pkg_data, SB_HELLO_PKG_DATA, SB_HELLO_PKG_DATA_LEN);
+    } else {
+        hello_pkg_data.version = 1;
+        *(in_addr_t *)(char *)(hello_pkg_data.data) = conn->app->config->addr.s_addr;
+    }
+
     /* send 3 syncs if UDP, in case of dropping */
     /* put a initial package into packages_t2n, so that it can be send to server */
-    struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, SB_HELLO_PKG_DATA, SB_HELLO_PKG_DATA_LEN);
+    struct sb_package * init_pkg = sb_package_new(SB_PKG_TYPE_INIT_1, &hello_pkg_data, SB_HELLO_PKG_DATA_LEN);
     if (!init_pkg) {
         log_error("failed to create init pkg");
         return;
@@ -251,7 +259,7 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
     switch(conn->net_state) {
         case NEW_0:
             /* client */
-            if (conn->app->config->app_mode == SB_CLIENT) {
+            if (app->config->app_mode == SB_CLIENT) {
                 log_warn("received a package with type %d from %s in state %d, ignoring", pkg->type, conn->desc, conn->net_state);
                 break;
             }
@@ -263,11 +271,29 @@ int sb_conn_net_received_pkg(struct sb_connection * conn, struct sb_package * pk
             }
             log_info("hello init pkg from %s", conn->desc);
             struct in_addr client_vpn_addr;
-            client_vpn_addr = sb_find_a_addr_lease(app);
-            if (client_vpn_addr.s_addr == 0) {
-                log_warn("can not find a vpn address for %s", conn->desc);
-                sb_connection_change_net_state(conn, TERMINATED_4);
-                break;
+
+            struct sb_hello_pkg_data* hello = (struct sb_hello_pkg_data*)pkg->ipdata;
+            if (hello->version == 1) {
+                client_vpn_addr = *(struct in_addr*)(char *)hello->data;
+                log_warn("client request to use address %s", sb_util_human_addr(AF_INET, &client_vpn_addr), conn->desc);
+                // same subnet
+                if ((client_vpn_addr.s_addr & app->config->mask.s_addr) != (app->config->addr.s_addr & app->config->mask.s_addr)) {
+                    log_warn("client request to use address %s that no in the same subnet", sb_util_human_addr(AF_INET, &client_vpn_addr), conn->desc);
+                    sb_connection_change_net_state(conn, TERMINATED_4);
+                    break;
+                }
+                if (client_vpn_addr.s_addr == app->config->addr.s_addr || sb_vpn_addr_used(app, client_vpn_addr)) {
+                    log_warn("client request to use address %s that is already used", sb_util_human_addr(AF_INET, &client_vpn_addr), conn->desc);
+                    sb_connection_change_net_state(conn, TERMINATED_4);
+                    break;
+                }
+            } else {
+                client_vpn_addr = sb_find_a_addr_lease(app);
+                if (client_vpn_addr.s_addr == 0) {
+                    log_warn("can not find a vpn address for %s", conn->desc);
+                    sb_connection_change_net_state(conn, TERMINATED_4);
+                    break;
+                }
             }
             log_info("letting client use %s %s", sb_util_human_addr(AF_INET, &client_vpn_addr), conn->desc);
             /* generate a cookie package and send to client */
