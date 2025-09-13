@@ -9,7 +9,7 @@
 
 #define SB_CONFIG_STR_MAX 256
 
-#define SB_RT_MAX 1024
+#define SB_RT_MAX 2048
 
 /* max length of if_up_script and if_down_script */
 #define SB_CMD_MAX 1024
