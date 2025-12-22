@@ -32,3 +32,16 @@ make CC=${STAGING_DIR}/bin/mips-openwrt-linux-uclibc-gcc CFLAGS='--std=gnu99 -I$
 this will create a binary that dynamically linked with libevent and libconfuse.
 
 I ran the link command with "-levent -lconfuse" replaced with "-l:libevent.a -l:libconfuse.a" to get a static linked bin.
+
+# compile a static binary:
+
+## create builder docker image
+
+docker build -t sevenever/sbwdn-builder:latest -f builder.Dockerfile .
+
+## build with docker
+
+docker run --rm --name sbwdn-builder -v "$PWD:/src" -w /src sevenever/sbwdn-builder sh -c "make clean && make"
+
+
+

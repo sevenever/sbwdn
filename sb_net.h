@@ -2,7 +2,7 @@
 #define _SB_NET_H
 
 #include <stdint.h>
-#include <sys/queue.h>
+#include <bsd/sys/queue.h>
 #include <event2/event.h>
 
 #define PROTO_IPV4 0x0800
