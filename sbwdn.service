@@ -1,0 +1,15 @@
+[Unit]
+Description=sha bi wan dian nao
+After=network.target
+
+[Service]
+Type=forking
+PIDFile=/var/run/sbwdn.pid
+ExecStart=/usr/bin/sbwdn -f /etc/sbwdn/server.conf
+Restart=on-failure
+RestartPreventExitStatus=255
+RuntimeDirectory=sbwdn
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
